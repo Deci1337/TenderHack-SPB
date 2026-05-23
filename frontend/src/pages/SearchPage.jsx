@@ -27,7 +27,6 @@ export default function SearchPage() {
   const [region, setRegion]       = useState('Москва')
   const [priceFrom, setPriceFrom] = useState('')
   const [priceTo, setPriceTo]     = useState('')
-  const [dateFrom, setDateFrom]   = useState('')
   const [dateTo, setDateTo]       = useState('')
   const [hints, setHints]         = useState([])
   const [showHints, setShowHints] = useState(false)
@@ -47,7 +46,6 @@ export default function SearchPage() {
     const params = new URLSearchParams({ q, region })
     if (priceFrom) params.set('priceFrom', priceFrom)
     if (priceTo)   params.set('priceTo', priceTo)
-    if (dateFrom)  params.set('dateFrom', dateFrom)
     if (dateTo)    params.set('dateTo', dateTo)
     navigate(`/results?${params.toString()}`)
   }
@@ -166,9 +164,8 @@ export default function SearchPage() {
             </select>
           </div>
 
-          {/* Фильтры: цена и даты */}
-          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '10px', marginBottom: '14px' }}>
-            {/* Ценовой диапазон */}
+          {/* Фильтр: цена */}
+          <div style={{ marginBottom: '14px' }}>
             <div style={{ display: 'flex', alignItems: 'center', gap: '6px', padding: '10px 14px', background: '#F8FAFC', borderRadius: '10px', border: '1px solid #E2E8F0' }}>
               <SlidersHorizontal size={14} color="#1D6ECA" strokeWidth={2.5} />
               <input
@@ -176,7 +173,7 @@ export default function SearchPage() {
                 placeholder="от ₽"
                 value={priceFrom}
                 onChange={e => setPriceFrom(e.target.value)}
-                style={{ border: 'none', background: 'transparent', width: '60px', fontSize: '13px', fontFamily: 'inherit', color: '#0F172A', outline: 'none' }}
+                style={{ border: 'none', background: 'transparent', width: '80px', fontSize: '13px', fontFamily: 'inherit', color: '#0F172A', outline: 'none' }}
               />
               <span style={{ color: '#CBD5E1', fontSize: '12px' }}>—</span>
               <input
@@ -184,27 +181,21 @@ export default function SearchPage() {
                 placeholder="до ₽"
                 value={priceTo}
                 onChange={e => setPriceTo(e.target.value)}
-                style={{ border: 'none', background: 'transparent', width: '60px', fontSize: '13px', fontFamily: 'inherit', color: '#0F172A', outline: 'none' }}
+                style={{ border: 'none', background: 'transparent', width: '80px', fontSize: '13px', fontFamily: 'inherit', color: '#0F172A', outline: 'none' }}
               />
             </div>
+          </div>
 
-            {/* Даты поставки */}
-            <div style={{ display: 'flex', alignItems: 'center', gap: '6px', padding: '10px 14px', background: '#F8FAFC', borderRadius: '10px', border: '1px solid #E2E8F0' }}>
-              <span style={{ fontSize: '12px', color: '#64748B', fontWeight: 500, whiteSpace: 'nowrap' }}>Поставка:</span>
-              <input
-                type="date"
-                value={dateFrom}
-                onChange={e => setDateFrom(e.target.value)}
-                style={{ border: 'none', background: 'transparent', fontSize: '12px', fontFamily: 'inherit', color: '#0F172A', outline: 'none', width: '100px' }}
-              />
-              <span style={{ color: '#CBD5E1', fontSize: '12px' }}>—</span>
-              <input
-                type="date"
-                value={dateTo}
-                onChange={e => setDateTo(e.target.value)}
-                style={{ border: 'none', background: 'transparent', fontSize: '12px', fontFamily: 'inherit', color: '#0F172A', outline: 'none', width: '100px' }}
-              />
-            </div>
+          {/* Срок поставки — до выбранной даты */}
+          <div style={{ display: 'flex', alignItems: 'center', gap: '8px', padding: '10px 14px', background: '#F8FAFC', borderRadius: '10px', border: '1px solid #E2E8F0', marginBottom: '14px' }}>
+            <span style={{ fontSize: '13px', color: '#64748B', fontWeight: 500, whiteSpace: 'nowrap' }}>Поставка до:</span>
+            <input
+              type="date"
+              value={dateTo}
+              min={new Date().toISOString().slice(0, 10)}
+              onChange={e => setDateTo(e.target.value)}
+              style={{ border: 'none', background: 'transparent', fontSize: '13px', fontFamily: 'inherit', color: '#0F172A', outline: 'none', cursor: 'pointer' }}
+            />
           </div>
 
           {/* Поле поиска */}

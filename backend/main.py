@@ -6,7 +6,12 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', 'ml'))
 from suggestions import get_suggestions
 from web_agent import search_runet
 from spell_checker import correct
-from llm_service import expand_query
+
+# expand_query тянет Qwen модель (~8 ГБ). Включается после `python ml/download_model.py`
+# Чтобы включить — поставь USE_LLM=1 в окружении
+USE_LLM = os.getenv("USE_LLM") == "1"
+if USE_LLM:
+    from llm_service import expand_query
 
 app = FastAPI(title="PriceHunter API")
 
@@ -23,6 +28,14 @@ def suggest(q: str = "", limit: int = 7):
     return get_suggestions(q, limit)
 
 
+@app.get("/api/correct")
+def correct_query(q: str = ""):
+    if not q.strip():
+        return {"original": q, "corrected": q, "changed": False}
+    corrected = correct(q)
+    return {"original": q, "corrected": corrected, "changed": corrected != q}
+
+
 @app.get("/api/search/runet")
 async def search_runet_endpoint(q: str = "", region: str = "Москва"):
     if not q.strip():
@@ -31,16 +44,21 @@ async def search_runet_endpoint(q: str = "", region: str = "Москва"):
     # 1. Исправляем опечатки локально (symspellpy, без интернета)
     corrected = correct(q)
 
-    # 2. LLM расширяет запрос: "шина летняя" → ["шина летняя", "летние шины", "автошина"]
-    variants = expand_query(corrected)
-    if not variants:
-        variants = [corrected]
+    # 2. LLM расширяет запрос (если модель скачана и USE_LLM=1)
+    variants = [corrected]
+    if USE_LLM:
+        try:
+            ext = expand_query(corrected)
+            if ext:
+                variants = ext
+        except Exception:
+            pass
 
-    # 3. Ищем по первому (основному) варианту — он уже исправлен и расширен
+    # 3. Ищем по первому варианту
     primary = variants[0]
     products = await search_runet(primary, region=region)
 
-    # 4. Если мало результатов — добираем по синонимам
+    # 4. Если мало — добираем по синонимам
     if len(products) < 3 and len(variants) > 1:
         for variant in variants[1:]:
             if len(products) >= 5:

@@ -51,12 +51,10 @@ import json
 import logging
 import re
 from dataclasses import dataclass, field
+from urllib.parse import urljoin, urlparse
 
 import httpx
-import torch
 from playwright.async_api import async_playwright
-
-from llm_service import _load_model
 
 logger = logging.getLogger(__name__)
 
@@ -106,13 +104,22 @@ COMMERCE_KEYWORDS = (
 SCORE_WEIGHTS = {
     "commerce_keywords": 3.0,   # сильный сигнал: товар продают
     "ru_zone":           2.0,   # домен .ru / .рф
+    "product_card":      4.0,   # явная карточка: /product/123, /p/123, числовой id
     "product_path":      1.5,   # /product/, /catalog/, /tovar/
     "shop_marker":       2.5,   # shop/store/market в имени домена
     "marketplace":     -10.0,   # blacklist — точно выбрасываем
     "aggregator":       -5.0,   # форум/обзор — не товарная страница
+    "search_page":      -4.0,   # страница результатов поиска на сайте
 }
 
-MAX_DDG_URLS   = 10   # берём из DDG после ранжирования
+# Паттерны URL поисковых страниц на сайтах магазинов
+SEARCH_PAGE_PATTERNS = (
+    r'[?&](q|query|search|s|text|keyword)=',
+    r'/(search|poisk|katalog|catalog/search|results)/',
+    r'/(search|poisk)\?',
+)
+
+MAX_DDG_URLS   = 20   # берём из DDG после ранжирования
 MAX_PRODUCTS   = 5    # возвращаем максимум 5
 PAGE_TIMEOUT   = 12_000  # ms
 SNIPPET_LEN    = 4_000   # символов для Qwen fallback
@@ -145,8 +152,13 @@ def score_url(url: str, snippet: str = "") -> float:
     if domain.endswith((".ru", ".рф", ".su")):
         score += SCORE_WEIGHTS["ru_zone"]
 
-    # 3) Путь URL похож на карточку товара
-    if re.search(r'/(product|tovar|item|good|catalog|p)/', url_lower):
+    # 3) Явная карточка товара: числовой id в конце пути или product/item/tovar
+    if re.search(r'/(product|tovar|item|goods?|p)/[\w-]*\d+', url_lower):
+        score += SCORE_WEIGHTS["product_card"]
+    elif re.search(r'/(product|tovar|item|good|p)/', url_lower):
+        score += SCORE_WEIGHTS["product_path"]
+    elif re.search(r'/[\w-]+-\d{4,}[/\.]?', url_lower):
+        # slug-123456 — типичный паттерн карточки
         score += SCORE_WEIGHTS["product_path"]
 
     # 4) Признак интернет-магазина в домене
@@ -160,6 +172,10 @@ def score_url(url: str, snippet: str = "") -> float:
     # 6) Агрегаторы отзывов и форумы
     if any(m in url_lower for m in AGGREGATOR_MARKERS):
         score += SCORE_WEIGHTS["aggregator"]
+
+    # 7) Страница поиска по сайту — скорее листинг, чем карточка
+    if any(re.search(p, url_lower) for p in SEARCH_PAGE_PATTERNS):
+        score += SCORE_WEIGHTS["search_page"]
 
     return score
 
@@ -180,7 +196,7 @@ class RunetProduct:
     extraction_method: str = ""  # jsonld | opengraph | dom | qwen
 
     def is_valid(self) -> bool:
-        return bool(self.name and self.price > 0 and self.image_url and self.source_url)
+        return bool(self.name and self.price > 0 and self.source_url)
 
 
 # Уверенность агента по методу извлечения данных.
@@ -249,7 +265,7 @@ async def ddg_search(query: str) -> list[tuple[str, float]]:
                 continue
             seen.add(url)
             s = score_url(url, snippet)
-            if s > 0:  # только положительные — отрицательные точно мусор
+            if s > -3:  # отсекаем только явный чёрный список (marketplace=-10, aggregator=-5)
                 scored.append((url, s))
 
         scored.sort(key=lambda x: x[1], reverse=True)
@@ -416,13 +432,30 @@ async def extract_from_dom(page, url: str) -> dict | None:
 
         # Ищем главную картинку товара
         image_url = await page.evaluate("""() => {
-            // og:image — самый надёжный
+            // 1. Специфичные зоны карточки товара
+            const gallerySels = [
+                '[class*="gallery"] img',
+                '[class*="product-image"] img',
+                '[class*="product_image"] img',
+                '[class*="ProductImage"] img',
+                '[class*="item-photo"] img',
+                '[class*="swiper-slide"] img',
+                '[itemprop="image"]',
+                'picture img',
+            ]
+            for (const sel of gallerySels) {
+                const el = document.querySelector(sel)
+                const src = el?.src || el?.getAttribute('content') || el?.getAttribute('data-src')
+                if (src && src.startsWith('http') && !src.includes('logo') && !src.includes('icon'))
+                    return src
+            }
+            // 2. og:image (если не листинг — норм)
             const og = document.querySelector('meta[property="og:image"]')
             if (og) return og.getAttribute('content')
-            // Largest img на странице
+            // 3. Крупнейшее изображение
             const imgs = [...document.querySelectorAll('img[src]')]
             imgs.sort((a,b) => (b.naturalWidth*b.naturalHeight) - (a.naturalWidth*a.naturalHeight))
-            const img = imgs.find(i => i.naturalWidth > 100 && !i.src.includes('logo'))
+            const img = imgs.find(i => i.naturalWidth > 150 && !i.src.includes('logo') && !i.src.includes('icon'))
             return img?.src || null
         }""")
 
@@ -499,6 +532,8 @@ _EXTRACT_PROMPT = """\
 def qwen_extract(query: str, page_text: str, source_url: str) -> dict | None:
     """Qwen как последний fallback — извлекает данные из текста страницы."""
     try:
+        import torch
+        from llm_service import _load_model
         model, tokenizer = _load_model()
 
         snippet = " ".join(page_text.split())[:SNIPPET_LEN]
@@ -557,14 +592,67 @@ def qwen_extract(query: str, page_text: str, source_url: str) -> dict | None:
 # Сборка: обрабатываем одну страницу
 # ---------------------------------------------------------------------------
 
+async def _find_product_link(page, base_url: str) -> str | None:
+    """
+    Если попали на листинг/категорию — ищем ссылку на первую карточку товара.
+    Возвращает абсолютный URL карточки или None.
+    """
+    try:
+        href = await page.evaluate("""() => {
+            // Типичные контейнеры карточек товаров
+            const cardSelectors = [
+                '[class*="product-card"] a',
+                '[class*="product_card"] a',
+                '[class*="ProductCard"] a',
+                '[class*="catalog-item"] a',
+                '[class*="item-card"] a',
+                '[class*="goods-item"] a',
+                '[class*="product-item"] a',
+                '[class*="product-tile"] a',
+                '.product a[href]',
+                'article a[href]',
+            ]
+            for (const sel of cardSelectors) {
+                const el = document.querySelector(sel)
+                if (el && el.href) return el.href
+            }
+            // Fallback: ссылка с числовым id в пути
+            const links = [...document.querySelectorAll('a[href]')]
+            const card = links.find(a => /\\/(product|tovar|item|goods?|p)\\/[\\w-]*\\d+/i.test(a.href)
+                                     || /\\/[\\w-]+-\\d{5,}\\/?$/.test(a.href))
+            return card?.href || null
+        }""")
+        if href and href.startswith("http") and _domain_of(href) == _domain_of(base_url):
+            return href
+    except Exception:
+        pass
+    return None
+
+
 async def process_url(page, url: str, query: str, use_qwen: bool = False) -> RunetProduct | None:
     """
     Пробует извлечь товар с URL.
     Стратегия: JSON-LD → OpenGraph → DOM → Qwen (только если use_qwen=True).
+    Если URL оказался листингом — следует по ссылке на первую карточку.
     """
     html = await load_page(page, url)
     if not html:
         return None
+
+    # Проверяем: может это листинг (много цен)? Ищем карточку товара.
+    is_listing = await page.evaluate("""() => {
+        const prices = document.querySelectorAll('[class*="price"],[itemprop="price"]')
+        return prices.length > 4
+    }""")
+
+    if is_listing:
+        product_url = await _find_product_link(page, url)
+        if product_url and product_url != url:
+            logger.info("Листинг → переходим на карточку: %s", product_url)
+            html = await load_page(page, product_url)
+            if not html:
+                return None
+            url = product_url  # обновляем source_url
 
     # Пробуем по приоритету
     data = (
@@ -589,10 +677,15 @@ async def process_url(page, url: str, query: str, use_qwen: bool = False) -> Run
     if not name or price <= 0:
         return None
 
-    # Картинка обязательна по ТЗ
+    # Резолвим относительный URL картинки
+    if image and not image.startswith("http"):
+        base = f"{urlparse(url).scheme}://{urlparse(url).netloc}"
+        image = urljoin(base, image)
+
+    # Картинка желательна, но не блокируем товар если её нет
     if not image or not image.startswith("http"):
-        logger.debug("Нет картинки для %s — пропускаем", url)
-        return None
+        image = ""
+        logger.debug("Нет картинки для %s — товар добавляем без фото", url)
 
     method = data.get("method", "qwen")
     confidence = CONFIDENCE_BY_METHOD.get(method, 0.4)

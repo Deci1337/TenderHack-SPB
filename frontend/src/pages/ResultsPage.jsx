@@ -118,18 +118,25 @@ export default function ResultsPage() {
   const region     = searchParams.get('region') || 'Москва'
   const priceFrom  = parseFloat(searchParams.get('priceFrom')) || null
   const priceTo    = parseFloat(searchParams.get('priceTo'))   || null
-  const dateFrom   = searchParams.get('dateFrom') || null
-  const dateTo     = searchParams.get('dateTo')   || null
+  const dateTo     = searchParams.get('dateTo') || null
 
   const deliveryDays = useMemo(() => {
-    if (!dateFrom || !dateTo) return null
-    return Math.round((new Date(dateTo) - new Date(dateFrom)) / 86400000)
-  }, [dateFrom, dateTo])
+    if (!dateTo) return null
+    const today = new Date(); today.setHours(0, 0, 0, 0)
+    return Math.round((new Date(dateTo) - today) / 86400000)
+  }, [dateTo])
 
   const [loadedSources, setLoadedSources] = useState([])
   const [modalIndex, setModalIndex] = useState(null)
-
   const [runetProducts, setRunetProducts] = useState([])
+  const [correction, setCorrection] = useState(null) // {original, corrected}
+
+  useEffect(() => {
+    fetch(`/api/correct?q=${encodeURIComponent(query)}`)
+      .then(r => r.json())
+      .then(d => { if (d.changed) setCorrection(d) })
+      .catch(() => {})
+  }, [query])
 
   useEffect(() => {
     setLoadedSources([])
@@ -262,6 +269,26 @@ export default function ResultsPage() {
           </div>
         </div>
       </header>
+
+      {correction && (
+        <div style={{
+          background: '#EFF6FF',
+          borderBottom: '1px solid #BFDBFE',
+          padding: '10px 24px',
+          display: 'flex', alignItems: 'center', gap: '10px',
+          fontSize: '13px', color: '#1E40AF',
+        }}>
+          <span style={{ opacity: 0.6 }}>✦</span>
+          <span>
+            Исправлено:{' '}
+            <span style={{ fontWeight: 700, textDecoration: 'line-through', opacity: 0.55 }}>
+              «{correction.original}»
+            </span>
+            {' → '}
+            <span style={{ fontWeight: 700 }}>«{correction.corrected}»</span>
+          </span>
+        </div>
+      )}
 
       <main style={{ maxWidth: '1400px', margin: '0 auto', padding: '32px 24px' }}>
 
