@@ -7,6 +7,7 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', 'ml'))
 from suggestions import get_suggestions
 from web_agent import search_runet
 from spell_checker import correct
+from marketplace_parsers import search_wildberries as _py_wb, search_ozon as _py_ozon, search_yandex_market as _py_ym
 
 logger = logging.getLogger(__name__)
 
@@ -106,12 +107,41 @@ async def _call_parser(source: str, q: str, region: str, limit: int = 5) -> dict
         return {"source": source, "products": [], "liveHit": False}
 
 
+def _mp_to_dict(p, source: str, idx: int) -> dict:
+    return {
+        "id": f"{source}_{idx}",
+        "name": p.name,
+        "price": p.price,
+        "image_url": p.image_url,
+        "source_url": p.source_url,
+        "source": source,
+        "characteristics": p.characteristics or {},
+    }
+
+
+async def _search_with_fallback(source: str, q: str, region: str, py_fn):
+    data = await _call_parser(source, q, region)
+    if data.get("products"):
+        return data
+    # Node.js server unavailable or returned 0 results — use Python parser
+    try:
+        products = await asyncio.get_event_loop().run_in_executor(None, py_fn, q, region, 8)
+        return {
+            "source": source,
+            "products": [_mp_to_dict(p, source, i) for i, p in enumerate(products)],
+            "liveHit": bool(products),
+        }
+    except Exception as e:
+        logger.warning("Python parser failed for %s: %s", source, e)
+        return {"source": source, "products": [], "liveHit": False}
+
+
 @app.get("/api/search/wildberries")
 async def search_wb(q: str = "", region: str = "Москва"):
     if not q.strip():
         return {"products": [], "liveHit": False}
     corrected = correct(q)
-    return await _call_parser("wildberries", corrected, region)
+    return await _search_with_fallback("wildberries", corrected, region, _py_wb)
 
 
 @app.get("/api/search/ozon")
@@ -119,7 +149,7 @@ async def search_ozon(q: str = "", region: str = "Москва"):
     if not q.strip():
         return {"products": [], "liveHit": False}
     corrected = correct(q)
-    return await _call_parser("ozon", corrected, region)
+    return await _search_with_fallback("ozon", corrected, region, _py_ozon)
 
 
 @app.get("/api/search/yandex_market")
@@ -127,7 +157,7 @@ async def search_ym(q: str = "", region: str = "Москва"):
     if not q.strip():
         return {"products": [], "liveHit": False}
     corrected = correct(q)
-    return await _call_parser("yandex_market", corrected, region)
+    return await _search_with_fallback("yandex_market", corrected, region, _py_ym)
 
 
 @app.get("/health")
