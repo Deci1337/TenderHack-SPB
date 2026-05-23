@@ -1,0 +1,480 @@
+"""
+Нативные Python-парсеры для WB, Ozon, Яндекс Маркет.
+Работают без Docker/stealth-браузера через httpx + JSON-API.
+"""
+
+import asyncio
+import json
+import logging
+import re
+from dataclasses import dataclass, field
+from urllib.parse import quote, urljoin
+
+import httpx
+
+logger = logging.getLogger(__name__)
+
+TIMEOUT = httpx.Timeout(20.0)
+BASE_HEADERS = {
+    "Accept-Language": "ru-RU,ru;q=0.9,en;q=0.8",
+    "Accept-Encoding": "gzip, deflate, br",
+    "Connection": "keep-alive",
+}
+
+
+@dataclass
+class MarketProduct:
+    name: str
+    price: float
+    image_url: str
+    source_url: str
+    source: str
+    characteristics: dict = field(default_factory=dict)
+
+    def to_dict(self, idx: int) -> dict:
+        return {
+            "id": f"{self.source}_{idx}",
+            "name": self.name,
+            "price": self.price,
+            "image_url": self.image_url,
+            "source_url": self.source_url,
+            "source": self.source,
+            "characteristics": self.characteristics,
+        }
+
+
+# ─────────────────────────────────────────────────────────────
+# WILDBERRIES
+# ─────────────────────────────────────────────────────────────
+
+def _wb_image(nm_id: int) -> str:
+    """Конструирует URL главного фото товара WB по nmId."""
+    vol = nm_id // 100000
+    part = nm_id // 1000
+    # Таблица basket → диапазон vol (из исходников WB JS)
+    basket_ranges = [
+        (143, 1), (287, 2), (431, 3), (719, 4), (1007, 5),
+        (1061, 6), (1115, 7), (1169, 8), (1313, 9), (1601, 10),
+        (1655, 11), (1919, 12), (2045, 13), (2189, 14), (2405, 15),
+        (2621, 16), (2837, 17), (3053, 18), (3269, 19), (3485, 20),
+    ]
+    basket = 21
+    for max_vol, b in basket_ranges:
+        if vol <= max_vol:
+            basket = b
+            break
+    return f"https://basket-{basket:02d}.wbbasket.ru/vol{vol}/part{part}/{nm_id}/images/c516x688/1.jpg"
+
+
+async def search_wildberries(query: str, region: str = "Москва", limit: int = 5) -> list[MarketProduct]:
+    dests = ["-1257786", "-1275551", "12358062", "-446031"]
+    user_agents = [
+        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/144.0.0.0 Safari/537.36",
+        "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/144.0.0.0 Safari/537.36",
+    ]
+    q = quote(query)
+
+    async with httpx.AsyncClient(timeout=TIMEOUT, follow_redirects=True) as client:
+        for i, dest in enumerate(dests):
+            ua = user_agents[i % len(user_agents)]
+            # Пробуем v18 (same-origin) и v9 поочерёдно
+            urls = [
+                f"https://www.wildberries.ru/__internal/u-search/exactmatch/ru/common/v18/search"
+                f"?appType=1&curr=rub&dest={dest}&query={q}&resultset=catalog&sort=popular&spp=30&lang=ru",
+                f"https://search.wb.ru/exactmatch/ru/common/v9/search"
+                f"?appType=1&curr=rub&dest={dest}&query={q}&resultset=catalog&sort=popular&spp=30&lang=ru",
+            ]
+            for url in urls:
+                is_v18 = "v18" in url
+                headers = {
+                    **BASE_HEADERS,
+                    "Accept": "*/*",
+                    "User-Agent": ua,
+                    "Origin": "https://www.wildberries.ru",
+                    "Referer": f"https://www.wildberries.ru/catalog/0/search.aspx?search={q}",
+                }
+                if is_v18:
+                    headers.update({
+                        "x-requested-with": "XMLHttpRequest",
+                        "x-spa-version": "13.21.4",
+                        "x-userid": "0",
+                        "sec-fetch-site": "same-origin",
+                        "sec-fetch-mode": "cors",
+                        "sec-fetch-dest": "empty",
+                    })
+                try:
+                    r = await client.get(url, headers=headers)
+                    if r.status_code == 429:
+                        await asyncio.sleep(1.5)
+                        continue
+                    if r.status_code != 200:
+                        continue
+                    data = r.json()
+                    products = data.get("data", {}).get("products", [])
+                    if not products:
+                        continue
+
+                    result = []
+                    for p in products[:limit]:
+                        nm_id = p.get("id") or p.get("nmId") or p.get("nmID")
+                        if not nm_id:
+                            continue
+                        name = p.get("name", "").strip()
+                        # Цена: sizes[0].price.product (в копейках) или salePriceU
+                        sizes = p.get("sizes", [])
+                        price_raw = (
+                            (sizes[0].get("price", {}).get("product") if sizes else None)
+                            or p.get("salePriceU")
+                            or p.get("priceU")
+                            or 0
+                        )
+                        price = price_raw / 100 if price_raw > 1000 else price_raw
+                        if not name or price <= 0:
+                            continue
+                        chars = {}
+                        if p.get("brand"):
+                            chars["Бренд"] = p["brand"]
+                        if p.get("subjectName"):
+                            chars["Категория"] = p["subjectName"]
+                        result.append(MarketProduct(
+                            name=name,
+                            price=price,
+                            image_url=_wb_image(int(nm_id)),
+                            source_url=f"https://www.wildberries.ru/catalog/{nm_id}/detail.aspx",
+                            source="wildberries",
+                            characteristics=chars,
+                        ))
+                    if result:
+                        logger.info("WB: %d товаров для '%s' (dest=%s)", len(result), query, dest)
+                        return result
+                except Exception as e:
+                    logger.debug("WB attempt failed: %s", e)
+                await asyncio.sleep(0.6)
+
+    logger.warning("WB: ничего не найдено для '%s'", query)
+    return []
+
+
+# ─────────────────────────────────────────────────────────────
+# OZON
+# ─────────────────────────────────────────────────────────────
+
+async def search_ozon(query: str, region: str = "Москва", limit: int = 5) -> list[MarketProduct]:
+    q = quote(query)
+    url = f"https://www.ozon.ru/api/entrypoint-api.bx/page/json/v2?url=%2Fsearch%2F%3Ftext%3D{q}%26layout_container%3DsearchResultsV2"
+    headers = {
+        **BASE_HEADERS,
+        "Accept": "application/json",
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/144.0.0.0 Safari/537.36",
+        "Referer": f"https://www.ozon.ru/search/?text={q}",
+        "x-o3-app-name": "ozonweb",
+        "x-o3-app-version": "5.73.0",
+    }
+    try:
+        async with httpx.AsyncClient(timeout=TIMEOUT, follow_redirects=True) as client:
+            r = await client.get(url, headers=headers)
+            if r.status_code != 200:
+                logger.warning("Ozon API: %d для '%s'", r.status_code, query)
+                return await _search_ozon_html(query, limit)
+
+            data = r.json()
+            # Ищем виджет с товарами
+            widgets = {}
+            for key in ["catalog", "searchResultsV2", "searchPage"]:
+                widgets = data.get(key, {})
+                if widgets:
+                    break
+            if not widgets:
+                widgets = data  # попробуем весь ответ
+
+            products = _extract_ozon_items(widgets, limit)
+            if products:
+                return products
+
+    except Exception as e:
+        logger.warning("Ozon API error: %s", e)
+
+    return await _search_ozon_html(query, limit)
+
+
+def _extract_ozon_items(data: dict, limit: int) -> list[MarketProduct]:
+    """Рекурсивно ищет items с title+price в ответе Ozon."""
+    results = []
+    seen = set()
+
+    def walk(node):
+        if not isinstance(node, dict) or len(results) >= limit:
+            return
+        # Формат виджета searchResultsV2: {items: [{trackingInfo: {title, finalPrice, ...}}]}
+        items = node.get("items") or node.get("products") or []
+        if isinstance(items, list):
+            for item in items:
+                if len(results) >= limit:
+                    return
+                _try_ozon_item(item, seen, results)
+        for v in node.values():
+            if isinstance(v, dict):
+                walk(v)
+            elif isinstance(v, list):
+                for el in v:
+                    if isinstance(el, dict):
+                        walk(el)
+
+    walk(data)
+    return results
+
+
+def _try_ozon_item(item: dict, seen: set, results: list):
+    # Разные форматы ответа Ozon
+    info = item.get("cellTrackingInfo") or item.get("trackingInfo") or item
+    title = info.get("title") or info.get("name", "")
+    price_raw = info.get("finalPrice") or info.get("price") or info.get("salePrice") or 0
+    url_path = item.get("url") or info.get("url") or info.get("link", "")
+    img = (item.get("image") or info.get("image")
+           or (item.get("images") or [None])[0] or "")
+    if isinstance(img, dict):
+        img = img.get("url", "")
+
+    try:
+        price = float(str(price_raw).replace(" ", "").replace(",", "."))
+    except Exception:
+        return
+
+    if not title or price <= 0:
+        return
+
+    key = title[:40] + str(price)
+    if key in seen:
+        return
+    seen.add(key)
+
+    source_url = f"https://www.ozon.ru{url_path}" if url_path.startswith("/") else url_path
+    results.append(MarketProduct(
+        name=title[:120],
+        price=price,
+        image_url=img,
+        source_url=source_url or "https://www.ozon.ru",
+        source="ozon",
+    ))
+
+
+async def _search_ozon_html(query: str, limit: int) -> list[MarketProduct]:
+    """Fallback: парсим __NEXT_DATA__ из HTML страницы Ozon."""
+    q = quote(query)
+    url = f"https://www.ozon.ru/search/?text={q}&from_global=true"
+    headers = {
+        **BASE_HEADERS,
+        "Accept": "text/html,application/xhtml+xml",
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/144.0.0.0 Safari/537.36",
+    }
+    try:
+        async with httpx.AsyncClient(timeout=TIMEOUT, follow_redirects=True) as client:
+            r = await client.get(url, headers=headers)
+            if r.status_code != 200:
+                return []
+            # Ищем __NEXT_DATA__
+            m = re.search(r'<script id="__NEXT_DATA__"[^>]*>(.*?)</script>', r.text, re.DOTALL)
+            if not m:
+                return []
+            data = json.loads(m.group(1))
+            results = []
+            seen = set()
+            _extract_ozon_items_from_next(data, seen, results, limit)
+            return results
+    except Exception as e:
+        logger.warning("Ozon HTML fallback error: %s", e)
+        return []
+
+
+def _extract_ozon_items_from_next(node, seen, results, limit):
+    if not isinstance(node, dict) or len(results) >= limit:
+        return
+    _try_ozon_item(node, seen, results)
+    for v in node.values():
+        if isinstance(v, dict):
+            _extract_ozon_items_from_next(v, seen, results, limit)
+        elif isinstance(v, list):
+            for el in v:
+                if isinstance(el, dict):
+                    _extract_ozon_items_from_next(el, seen, results, limit)
+
+
+# ─────────────────────────────────────────────────────────────
+# ЯНДЕКС МАРКЕТ
+# ─────────────────────────────────────────────────────────────
+
+async def search_yandex_market(query: str, region: str = "Москва", limit: int = 5) -> list[MarketProduct]:
+    # YM: пробуем internal API (используется мобильным приложением)
+    q = quote(query)
+    region_id = _ym_region_id(region)
+
+    endpoints = [
+        # Внутренний search API YM
+        f"https://market.yandex.ru/api/search?text={q}&regionId={region_id}&page=1&count={limit}&how=dpop",
+        # Альтернатива — виджет поиска
+        f"https://market.yandex.ru/search?text={q}&lr={region_id}",
+    ]
+
+    headers_api = {
+        **BASE_HEADERS,
+        "Accept": "application/json, text/plain, */*",
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/144.0.0.0 Safari/537.36",
+        "Referer": "https://market.yandex.ru/",
+        "x-requested-with": "XMLHttpRequest",
+    }
+    headers_html = {
+        **BASE_HEADERS,
+        "Accept": "text/html,application/xhtml+xml",
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/144.0.0.0 Safari/537.36",
+    }
+
+    async with httpx.AsyncClient(timeout=TIMEOUT, follow_redirects=True) as client:
+        # Пробуем API
+        try:
+            r = await client.get(endpoints[0], headers=headers_api)
+            if r.status_code == 200 and r.headers.get("content-type", "").startswith("application/json"):
+                data = r.json()
+                products = _extract_ym_items(data, limit)
+                if products:
+                    return products
+        except Exception as e:
+            logger.debug("YM API error: %s", e)
+
+        # Fallback: HTML со встроенным JSON
+        try:
+            r = await client.get(endpoints[1], headers=headers_html)
+            if r.status_code == 200:
+                products = _parse_ym_html(r.text, limit)
+                if products:
+                    return products
+        except Exception as e:
+            logger.debug("YM HTML error: %s", e)
+
+    return []
+
+
+def _ym_region_id(region: str) -> int:
+    mapping = {
+        "Москва": 213, "Санкт-Петербург": 2, "Новосибирск": 65,
+        "Екатеринбург": 54, "Казань": 43, "Нижний Новгород": 47,
+        "Челябинск": 56, "Самара": 51, "Омск": 66, "Ростов-на-Дону": 39,
+    }
+    return mapping.get(region, 213)
+
+
+def _extract_ym_items(data: dict, limit: int) -> list[MarketProduct]:
+    results = []
+    seen = set()
+
+    def walk(node):
+        if not isinstance(node, dict) or len(results) >= limit:
+            return
+        name = node.get("name") or node.get("title", "")
+        price_node = node.get("price") or node.get("prices") or {}
+        if isinstance(price_node, dict):
+            price_raw = price_node.get("value") or price_node.get("min") or price_node.get("avg") or 0
+        elif isinstance(price_node, (int, float, str)):
+            price_raw = price_node
+        else:
+            price_raw = 0
+        try:
+            price = float(str(price_raw).replace(" ", ""))
+        except Exception:
+            price = 0
+
+        if name and price > 0:
+            key = name[:40] + str(price)
+            if key not in seen:
+                seen.add(key)
+                url = node.get("url") or node.get("link") or ""
+                if url and not url.startswith("http"):
+                    url = "https://market.yandex.ru" + url
+                img = node.get("picture") or node.get("image") or node.get("photo") or ""
+                if isinstance(img, dict):
+                    img = img.get("url", "")
+                results.append(MarketProduct(
+                    name=name[:120],
+                    price=price,
+                    image_url=img,
+                    source_url=url or "https://market.yandex.ru",
+                    source="yandex_market",
+                ))
+
+        for v in node.values():
+            if isinstance(v, dict):
+                walk(v)
+            elif isinstance(v, list):
+                for el in v:
+                    if isinstance(el, dict):
+                        walk(el)
+
+    walk(data)
+    return results
+
+
+def _parse_ym_html(html: str, limit: int) -> list[MarketProduct]:
+    """Ищет JSON в скриптах страницы YM."""
+    # YM встраивает данные в window.__data или __NEXT_DATA__
+    patterns = [
+        r'<script[^>]*>\s*window\.__data\s*=\s*(\{.*?\});\s*</script>',
+        r'<script id="__NEXT_DATA__"[^>]*>(.*?)</script>',
+        r'window\["__NUXT__"\]\s*=\s*(\(.*?\))\s*;',
+    ]
+    for pat in patterns:
+        m = re.search(pat, html, re.DOTALL)
+        if m:
+            try:
+                data = json.loads(m.group(1))
+                products = _extract_ym_items(data, limit)
+                if products:
+                    return products
+            except Exception:
+                continue
+
+    # Последний шанс: ищем JSON-LD Product
+    results = []
+    seen = set()
+    for block in re.findall(r'<script[^>]+type="application/ld\+json"[^>]*>(.*?)</script>', html, re.DOTALL):
+        try:
+            data = json.loads(block)
+            if isinstance(data, list):
+                for item in data:
+                    if item.get("@type") == "Product":
+                        _try_jsonld_product(item, seen, results, limit)
+            elif data.get("@type") == "Product":
+                _try_jsonld_product(data, seen, results, limit)
+        except Exception:
+            continue
+        if len(results) >= limit:
+            break
+    return results
+
+
+def _try_jsonld_product(data: dict, seen: set, results: list, limit: int):
+    if len(results) >= limit:
+        return
+    name = data.get("name", "")
+    offers = data.get("offers", {})
+    if isinstance(offers, list):
+        offers = offers[0] if offers else {}
+    price_raw = offers.get("price", 0) or offers.get("lowPrice", 0)
+    try:
+        price = float(str(price_raw).replace(" ", ""))
+    except Exception:
+        return
+    if not name or price <= 0:
+        return
+    key = name[:40] + str(price)
+    if key in seen:
+        return
+    seen.add(key)
+    img = data.get("image", "")
+    if isinstance(img, list):
+        img = img[0] if img else ""
+    results.append(MarketProduct(
+        name=name[:120],
+        price=price,
+        image_url=img if isinstance(img, str) else "",
+        source_url=data.get("url", "https://market.yandex.ru"),
+        source="yandex_market",
+    ))

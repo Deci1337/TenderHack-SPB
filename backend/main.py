@@ -4,7 +4,6 @@ import sys, os, asyncio, json, logging
 import httpx
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', 'ml'))
-from suggestions import get_suggestions
 from web_agent import search_runet
 from spell_checker import correct
 from marketplace_parsers import search_wildberries as _py_wb, search_ozon as _py_ozon, search_yandex_market as _py_ym
@@ -34,17 +33,16 @@ async def suggest(q: str = "", limit: int = 3):
     q = q.strip()
     if len(q) < 2:
         return []
-    if USE_LLM:
-        try:
-            loop = asyncio.get_running_loop()
-            llm_hints = await loop.run_in_executor(
-                None, suggest_completions_list, q, min(limit, 8),
-            )
-            if llm_hints:
-                return llm_hints
-        except Exception as e:
-            logger.warning("LLM suggest failed: %s", e)
-    return get_suggestions(q, limit)
+    if not USE_LLM:
+        return []
+    try:
+        loop = asyncio.get_running_loop()
+        return await loop.run_in_executor(
+            None, suggest_completions_list, q, min(limit, 8),
+        )
+    except Exception as e:
+        logger.warning("LLM suggest failed: %s", e)
+        return []
 
 
 @app.get("/api/correct")
@@ -186,4 +184,4 @@ async def health():
             parser_ok = r.json().get("ok", False)
     except Exception:
         pass
-    return {"status": "ok", "parser_server": parser_ok}
+    return {"status": "ok", "parser_server": parser_ok, "llm": USE_LLM}
