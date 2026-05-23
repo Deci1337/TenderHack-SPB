@@ -177,7 +177,6 @@ _PROMPT = (
     '{{"corrected": "...", "variants": ["...", "...", "..."]}}'
 )
 
-
 @lru_cache(maxsize=512)
 def expand_query(query: str) -> list[str]:
     """
@@ -441,9 +440,8 @@ def calculate_nmck(prices: list[float]) -> dict:
                        f"Разброс цен слишком большой (от {min(prices):.0f} до {max(prices):.0f} ₽).",
         }
 
-    final = _select_closest_to_mean(filtered, 5)
-    mean = float(np.mean(final))
-    max_dev = max(abs(p - mean) / mean for p in final)
+    mean = float(np.mean(filtered))
+    max_dev = max(abs(p - mean) / mean for p in filtered)
 
     if max_dev > 0.33:
         return {
@@ -457,9 +455,9 @@ def calculate_nmck(prices: list[float]) -> dict:
         "nmck": round(mean, 2),
         "status": "success",
         "price_count": len(prices),
-        "filtered_count": len(final),
-        "filtered_prices": final,
-        "min_price": min(final),
-        "max_price": max(final),
-        "message": f"НМЦК рассчитана по {len(final)} ценам.",
+        "filtered_count": len(filtered),
+        "filtered_prices": filtered,
+        "min_price": min(filtered),
+        "max_price": max(filtered),
+        "message": f"НМЦК рассчитана по {len(filtered)} ценам.",
     }

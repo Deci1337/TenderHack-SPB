@@ -1,6 +1,5 @@
 """
 Локальная проверка опечаток через symspellpy + русский словарь.
-Внешние API запрещены по ТЗ — всё офлайн.
 """
 
 import os
@@ -11,6 +10,7 @@ _sym: SymSpell | None = None
 _lock = threading.Lock()
 
 DICT_PATH = os.path.join(os.path.dirname(__file__), "ru_dict.txt")
+DOMAIN_DICT_PATH = os.path.join(os.path.dirname(__file__), "ru_dict_domain.txt")
 
 
 def _load() -> SymSpell:
@@ -22,6 +22,8 @@ def _load() -> SymSpell:
             return _sym
         sym = SymSpell(max_dictionary_edit_distance=2, prefix_length=7)
         sym.load_dictionary(DICT_PATH, term_index=0, count_index=1, encoding="utf-8")
+        if os.path.isfile(DOMAIN_DICT_PATH):
+            sym.load_dictionary(DOMAIN_DICT_PATH, term_index=0, count_index=1, encoding="utf-8")
         _sym = sym
     return _sym
 
@@ -49,7 +51,6 @@ def correct(query: str) -> str:
             corrected.append(word)
             continue
 
-        # Короткие слова (≤3 символа) не трогаем — слишком агрессивно
         if len(word) <= 3:
             corrected.append(word)
             continue
