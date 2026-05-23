@@ -21,6 +21,8 @@
     "playwright": "^1.60.0"
   },
   "dependencies": {
-    "pdfjs-dist": "^5.4.449"
+    "pdfjs-dist": "^5.4.449",
+    "playwright-extra": "^4.3.6",
+    "puppeteer-extra-plugin-stealth": "^2.11.2"
   }
 }
