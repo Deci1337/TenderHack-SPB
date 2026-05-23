@@ -93,6 +93,23 @@ def _wb_image(nm_id: int) -> str:
     return f"https://basket-{basket:02d}.wbbasket.ru/vol{vol}/part{part}/{nm_id}/images/c516x688/1.jpg"
 
 
+def _wb_extract_products_from_text(text: str) -> dict:
+    """Извлекает массив products из частично невалидного JSON ответа WB."""
+    m = re.search(r'"products"\s*:\s*\[', text)
+    if not m:
+        return {}
+    start = m.end() - 1  # позиция открывающей [
+    decoder = json.JSONDecoder()
+    try:
+        arr, _ = decoder.raw_decode(text, start)
+        if isinstance(arr, list) and arr:
+            logger.debug("WB raw_decode: нашли %d продуктов", len(arr))
+            return {"data": {"products": arr}}
+    except Exception as e:
+        logger.debug("WB raw_decode failed: %s", e)
+    return {}
+
+
 async def search_wildberries(query: str, region: str = "Москва", limit: int = 8) -> list[MarketProduct]:
     dests = ["-1257786", "-1275551", "12358062", "-446031"]
     user_agents = [
@@ -135,10 +152,18 @@ async def search_wildberries(query: str, region: str = "Москва", limit: in
                         await asyncio.sleep(1.5)
                         continue
                     if r.status_code != 200:
+                        logger.debug("WB %s status=%d", "v18" if is_v18 else "v9", r.status_code)
                         continue
-                    data = r.json()
+                    try:
+                        data = r.json()
+                    except json.JSONDecodeError as e:
+                        logger.debug("WB JSON error at char %d, trying raw_decode fallback", e.pos)
+                        data = _wb_extract_products_from_text(r.text)
                     products = data.get("data", {}).get("products", [])
                     if not products:
+                        logger.debug("WB %s/dest=%s: 200 пустой результат, ключи=%s, body=%s",
+                                     "v18" if is_v18 else "v9", dest,
+                                     list(data.keys())[:6], r.text[:200])
                         continue
 
                     result = []
@@ -176,6 +201,16 @@ async def search_wildberries(query: str, region: str = "Москва", limit: in
                         result = select_median_products(result, limit)
                         logger.info("WB: %d медианных товаров для '%s' (dest=%s)", len(result), query, dest)
                         return result
+                    if products:
+                        sample = products[0]
+                        logger.debug(
+                            "WB %s/dest=%s: %d в API, но все отфильтрованы. "
+                            "id=%s name=%r sizes=%s saleU=%s priceU=%s",
+                            "v18" if is_v18 else "v9", dest, len(products),
+                            sample.get("id"), sample.get("name", "")[:30],
+                            bool(sample.get("sizes")), sample.get("salePriceU"),
+                            sample.get("priceU"),
+                        )
                 except Exception as e:
                     logger.debug("WB attempt failed: %s", e)
                 await asyncio.sleep(0.6)
@@ -257,7 +292,98 @@ async def search_ozon(query: str, region: str = "Москва", limit: int = 8) 
             return select_median_products(products, limit)
     except Exception as e:
         logger.warning("Ozon Playwright fallback failed: %s", e)
+
+    # Последний шанс: DDG site:ozon.ru → JSON-LD с карточек товаров
+    logger.info("Ozon: пробуем DDG site:ozon.ru")
+    products = await _search_ozon_via_ddg(query, limit)
+    if products:
+        return select_median_products(products, limit)
     return []
+
+
+async def _search_ozon_via_ddg(query: str, limit: int = 8) -> list[MarketProduct]:
+    """Ищет товары Ozon через DDG site:ozon.ru, извлекает JSON-LD с карточек."""
+    ddg_url = "https://lite.duckduckgo.com/lite/"
+    ddg_headers = {
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+        "Accept-Language": "ru-RU,ru;q=0.9",
+    }
+    product_urls: list[str] = []
+    try:
+        async with httpx.AsyncClient(headers=ddg_headers, timeout=10.0, follow_redirects=True) as client:
+            resp = await client.post(ddg_url, data={"q": f"{query} site:ozon.ru", "kl": "ru-ru"})
+            resp.raise_for_status()
+        hrefs = re.findall(r'href="(https?://(?:www\.)?ozon\.ru/[^"]+)"', resp.text)
+        seen_u: set[str] = set()
+        for href in hrefs:
+            if "/product/" in href and href not in seen_u:
+                seen_u.add(href)
+                # Убираем лишние query-параметры
+                product_urls.append(href.split("?")[0])
+            if len(product_urls) >= (limit + 4) * 2:
+                break
+    except Exception as e:
+        logger.warning("Ozon DDG search failed: %s", e)
+        return []
+
+    if not product_urls:
+        logger.info("Ozon DDG: product URLs не найдены для '%s'", query)
+        return []
+
+    logger.info("Ozon DDG: %d product URLs для '%s'", len(product_urls), query)
+    ozon_headers = {
+        **BASE_HEADERS,
+        "Accept": "text/html,application/xhtml+xml",
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+    }
+    products: list[MarketProduct] = []
+    seen_k: set[str] = set()
+    async with httpx.AsyncClient(timeout=TIMEOUT, follow_redirects=True) as client:
+        for url in product_urls[:limit + 4]:
+            if len(products) >= limit:
+                break
+            try:
+                r = await client.get(url, headers=ozon_headers)
+                if r.status_code != 200:
+                    continue
+                for block in re.findall(
+                    r'<script[^>]+type="application/ld\+json"[^>]*>(.*?)</script>',
+                    r.text, re.DOTALL,
+                ):
+                    try:
+                        data = json.loads(block.strip())
+                        if isinstance(data, list):
+                            data = next((d for d in data if d.get("@type") == "Product"), None)
+                        if not data or data.get("@type") != "Product":
+                            continue
+                        name = data.get("name", "")
+                        offers = data.get("offers", {})
+                        if isinstance(offers, list):
+                            offers = offers[0] if offers else {}
+                        price_raw = offers.get("price") or offers.get("lowPrice") or 0
+                        price = float(re.sub(r"[^\d.]", "", str(price_raw).replace(",", ".")))
+                        image = data.get("image", "")
+                        if isinstance(image, list):
+                            image = image[0] if image else ""
+                        if isinstance(image, dict):
+                            image = image.get("url", "")
+                        key = name[:40] + str(price)
+                        if key in seen_k or not name or price <= 0:
+                            continue
+                        seen_k.add(key)
+                        products.append(MarketProduct(
+                            name=name[:120], price=price,
+                            image_url=str(image) if image else "",
+                            source_url=url, source="ozon",
+                        ))
+                        break
+                    except Exception:
+                        continue
+            except Exception as e:
+                logger.debug("Ozon DDG page %s: %s", url, e)
+
+    logger.info("Ozon DDG: извлечено %d товаров для '%s'", len(products), query)
+    return products
 
 
 def _extract_ozon_items(data: dict, limit: int) -> list[MarketProduct]:
@@ -373,10 +499,11 @@ async def search_yandex_market(query: str, region: str = "Москва", limit: 
     q = quote(query)
     region_id = _ym_region_id(region)
 
-    # rs-токен обходит ASN/VPN-блокировку YM при прямом HTTP fetch
     rs = quote(YM_RS_TOKEN)
     endpoints = [
-        f"https://market.yandex.ru/search?text={q}&rs={rs}&lr={region_id}",
+        # allowSemanticRedirect=0 — запрещает редирект на карточку одного товара
+        f"https://market.yandex.ru/search?text={q}&lr={region_id}&allowSemanticRedirect=0&how=dpop",
+        f"https://market.yandex.ru/search?text={q}&rs={rs}&lr={region_id}&allowSemanticRedirect=0",
         f"https://market.yandex.ru/search?text={q}&lr={region_id}",
     ]
 
@@ -393,12 +520,18 @@ async def search_yandex_market(query: str, region: str = "Москва", limit: 
         for endpoint in endpoints:
             try:
                 r = await client.get(endpoint, headers=headers_html)
-                if r.status_code == 200:
+                final_url = str(r.url)
+                # YM иногда делает семантический редирект на карточку одного товара —
+                # /card/ или /product/ содержат только 1 JSON-LD, не список.
+                if r.status_code == 200 and "/card/" not in final_url and "/product/" not in final_url:
                     products = _parse_ym_html(r.text, 25)
-                    if products:
+                    if len(products) >= 3:
                         products = select_median_products(products, limit)
-                        logger.info("YM: %d медианных товаров для '%s'", len(products), query)
+                        logger.info("YM: %d медианных товаров для '%s' (url=%s)", len(products), query, final_url)
                         return products
+                    logger.debug("YM: html дал только %d товаров, идём в Playwright, url=%s", len(products), final_url)
+                elif r.status_code == 200:
+                    logger.debug("YM: пропускаем редирект на карточку %s", final_url)
             except Exception as e:
                 logger.debug("YM error: %s", e)
 
@@ -480,44 +613,85 @@ def _extract_ym_items(data: dict, limit: int) -> list[MarketProduct]:
     return results
 
 
+def _ym_extract_price(p: dict) -> float:
+    def _first_pos(obj) -> float:
+        if isinstance(obj, (int, float)) and obj > 0:
+            return float(obj)
+        if isinstance(obj, str):
+            try:
+                v = float(obj.replace(" ", "").replace("\xa0", ""))
+                if v > 0:
+                    return v
+            except Exception:
+                pass
+        if isinstance(obj, dict):
+            for v in obj.values():
+                r = _first_pos(v)
+                if r > 0:
+                    return r
+        return 0.0
+    for field in ("prices", "price", "offer", "salePrice", "minPrice"):
+        r = _first_pos(p.get(field))
+        if r > 0:
+            return r
+    return 0.0
+
+
 def _parse_ym_html(html: str, limit: int) -> list[MarketProduct]:
     """Парсит HTML страницы YM. Приоритет: noframes apiary → __NEXT_DATA__ → JSON-LD."""
     results = []
     seen: set[str] = set()
 
+    # Диагностика: что вообще есть в HTML
+    noframes_count = len(re.findall(r'<noframes[^>]+data-apiary="patch"', html))
+    jsonld_types = re.findall(r'"@type"\s*:\s*"([^"]+)"', html[:50000])
+    next_data_present = '__NEXT_DATA__' in html
+    logger.debug("YM HTML диагностика: noframes=%d, __NEXT_DATA__=%s, jsonld_types=%s, html_size=%d",
+                 noframes_count, next_data_present, list(dict.fromkeys(jsonld_types))[:10], len(html))
+
     # 1) YM встраивает данные товаров в <noframes data-apiary="patch"> блоки
+    _ym_colls_logged = False
     for blob_text in re.findall(r'<noframes[^>]+data-apiary="patch"[^>]*>(.*?)</noframes>', html, re.DOTALL):
         try:
             blob = json.loads(blob_text)
-            prod_map = blob.get("collections", {}).get("product", {})
-            for p in prod_map.values():
-                if len(results) >= limit:
-                    break
-                name = (p.get("titles") or {}).get("raw") or p.get("name", "")
-                prices = p.get("prices") or {}
-                price_raw = prices.get("min") or prices.get("avg") or p.get("price", 0)
-                try:
-                    price = float(str(price_raw).replace(" ", "").replace("\xa0", ""))
-                except Exception:
+            collections = blob.get("collections") or {}
+            if not collections:
+                continue
+            # Один раз логируем какие коллекции существуют
+            if not _ym_colls_logged:
+                logger.debug("YM noframes коллекции: %s", list(collections.keys()))
+                _ym_colls_logged = True
+            # Ищем товары в ЛЮБОЙ коллекции (YM переименовывал "product" в другие ключи)
+            for coll_name, coll_data in collections.items():
+                if not isinstance(coll_data, dict):
                     continue
-                if not name or price <= 0:
-                    continue
-                key = name[:40] + str(price)
-                if key in seen:
-                    continue
-                seen.add(key)
-                pid = p.get("id")
-                slug = p.get("slug", "")
-                url = f"https://market.yandex.ru/product--{slug}/{pid}" if slug and pid else "https://market.yandex.ru"
-                img = p.get("picture") or p.get("image") or ""
-                if isinstance(img, dict):
-                    img = img.get("url", "")
-                results.append(MarketProduct(
-                    name=name[:120], price=price, image_url=img,
-                    source_url=url, source="yandex_market",
-                ))
+                for p in coll_data.values():
+                    if not isinstance(p, dict) or len(results) >= limit:
+                        break
+                    name = (p.get("titles") or {}).get("raw") or p.get("name", "")
+                    price = _ym_extract_price(p)
+                    if not name or price <= 0 or len(name) < 4:
+                        continue
+                    key = name[:40] + str(price)
+                    if key in seen:
+                        continue
+                    seen.add(key)
+                    pid = p.get("id")
+                    slug = p.get("slug", "")
+                    url = (f"https://market.yandex.ru/product--{slug}/{pid}"
+                           if slug and pid else "https://market.yandex.ru")
+                    img = p.get("picture") or p.get("image") or ""
+                    if isinstance(img, dict):
+                        img = img.get("url", "")
+                    if isinstance(img, str) and img.startswith("//"):
+                        img = "https:" + img
+                    results.append(MarketProduct(
+                        name=name[:120], price=price, image_url=img,
+                        source_url=url, source="yandex_market",
+                    ))
         except Exception:
             continue
+    logger.debug("YM noframes итого: %d товаров", len(results))
     if results:
         return results
 
@@ -531,20 +705,65 @@ def _parse_ym_html(html: str, limit: int) -> list[MarketProduct]:
         except Exception:
             pass
 
-    # 3) JSON-LD Product
+    # 3) JSON-LD: Product / ItemList / OfferCatalog
     for block in re.findall(r'<script[^>]+type="application/ld\+json"[^>]*>(.*?)</script>', html, re.DOTALL):
         try:
             data = json.loads(block)
-            if isinstance(data, list):
-                for item in data:
-                    if item.get("@type") == "Product":
-                        _try_jsonld_product(item, seen, results, limit)
-            elif data.get("@type") == "Product":
-                _try_jsonld_product(data, seen, results, limit)
+            items_to_try = data if isinstance(data, list) else [data]
+            for item in items_to_try:
+                t = item.get("@type", "")
+                if t == "Product":
+                    _try_jsonld_product(item, seen, results, limit)
+                elif t in ("ItemList", "OfferCatalog"):
+                    for list_el in (item.get("itemListElement") or []):
+                        inner = list_el.get("item") or list_el
+                        if isinstance(inner, dict) and inner.get("@type") == "Product":
+                            _try_jsonld_product(inner, seen, results, limit)
+                elif t == "WebPage":
+                    # YM иногда кладёт товары в mainEntity
+                    main = item.get("mainEntity") or {}
+                    if main.get("@type") == "ItemList":
+                        for list_el in (main.get("itemListElement") or []):
+                            inner = list_el.get("item") or list_el
+                            if isinstance(inner, dict) and inner.get("@type") == "Product":
+                                _try_jsonld_product(inner, seen, results, limit)
         except Exception:
             continue
         if len(results) >= limit:
             break
+
+    # 4) Инлайн JSON с товарами: YM встраивает {"entity":"product",...} в JS
+    if not results:
+        for m_js in re.finditer(r'\{"entity":"product"[^}]{10,500}"price":\s*(\d+)', html):
+            try:
+                # Извлекаем фрагмент вокруг совпадения и пробуем его распарсить
+                start = m_js.start()
+                decoder = json.JSONDecoder()
+                obj, _ = decoder.raw_decode(html, start)
+                prices_obj = obj.get("prices") or {}
+                price_val = prices_obj.get("min") or prices_obj.get("avg") or obj.get("price", 0)
+                try:
+                    price = float(str(price_val).replace(" ", ""))
+                except Exception:
+                    continue
+                name = obj.get("name") or obj.get("title", "")
+                if name and price > 0:
+                    key = name[:40] + str(price)
+                    if key not in seen:
+                        seen.add(key)
+                        slug = obj.get("slug", "")
+                        pid = obj.get("id", "")
+                        url = f"https://market.yandex.ru/product--{slug}/{pid}" if slug else "https://market.yandex.ru"
+                        results.append(MarketProduct(
+                            name=name[:120], price=price,
+                            image_url=obj.get("picture") or "",
+                            source_url=url, source="yandex_market",
+                        ))
+                if len(results) >= limit:
+                    break
+            except Exception:
+                continue
+
     return results
 
 

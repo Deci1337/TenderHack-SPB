@@ -42,7 +42,7 @@ function offerToProduct(offer, source, idx) {
   }
   return {
     id: `${source}_${idx}`,
-    name: (offer.title ?? '').trim(),
+    name: (offer.title ?? '').trim().replace(/^[/\s]+/, ''),
     price: offer.price ?? 0,
     image_url: offer.image_url ?? '',
     source_url: offer.product_url ?? '',
@@ -107,17 +107,13 @@ const server = http.createServer(async (req, res) => {
       enrichSpecs: false,
     })
 
-    // Фильтр мусора:
-    //  • price > 0  — должна быть цена
-    //  • image_url есть — без фото карточка непригодна для сравнения
-    //  • все токены запроса встретились в названии (по 20 баллов за токен)
-    //    — это автоматически отсекает товары не по теме, включая «12 ₽ за шину»,
-    //    т.к. парсинг чужого поля редко даёт совпадение со всеми токенами запроса
-    const minScore = normalizedQ.tokens.length * 20
+    // Фильтр мусора: цена > 0, хотя бы 40% токенов запроса совпадают.
+    // image_url проверяем мягко — WB генерирует его по ID, для Ozon/YM может отсутствовать.
+    const nTokens = normalizedQ.tokens.length
+    const minScore = nTokens > 0 ? Math.max(20, Math.ceil(nTokens * 0.4) * 20) : 0
     const relevant = (result.offers ?? [])
       .filter(o => (o.price ?? 0) > 0)
-      .filter(o => (o.image_url ?? '').trim() !== '')
-      .filter(o => (o.relevance_score ?? 0) >= minScore)
+      .filter(o => nTokens === 0 || (o.relevance_score ?? 0) >= minScore)
       .sort((a, b) => (b.relevance_score ?? 0) - (a.relevance_score ?? 0))
       .slice(0, 25)
 

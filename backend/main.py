@@ -87,7 +87,7 @@ async def search_runet_endpoint(q: str = "", region: str = "Москва"):
 
     filtered = [
         p for p in products
-        if p.image_url and p.price > 0 and matches_query(p.name)
+        if p.price > 0 and matches_query(p.name)
     ]
     filtered.sort(key=lambda p: p.confidence, reverse=True)
     top = filtered[:10]

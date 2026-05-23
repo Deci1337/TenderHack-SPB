@@ -243,10 +243,23 @@ async function scrapeWildberriesApi({ normalizedQuery, limit = 20, timeoutMs = 1
     const price = normalizePrice(rawPrice);
     if (!product.name || !Number.isFinite(price)) continue;
 
+    // WB CDN image URL: basket number derived from nmId (verified formula May 2026)
+    const vol = Math.floor(id / 100000);
+    const part = Math.floor(id / 1000);
+    const basket = (
+      vol <= 143 ? '01' : vol <= 287 ? '02' : vol <= 431 ? '03' : vol <= 719 ? '04' :
+      vol <= 1007 ? '05' : vol <= 1061 ? '06' : vol <= 1115 ? '07' : vol <= 1169 ? '08' :
+      vol <= 1313 ? '09' : vol <= 1601 ? '10' : vol <= 1655 ? '11' : vol <= 1919 ? '12' :
+      vol <= 2045 ? '13' : vol <= 2189 ? '14' : vol <= 2405 ? '15' : vol <= 2621 ? '16' :
+      vol <= 2837 ? '17' : vol <= 3053 ? '18' : vol <= 3269 ? '19' : vol <= 3485 ? '20' :
+      vol <= 3701 ? '21' : vol <= 3917 ? '22' : vol <= 4133 ? '23' : vol <= 4349 ? '24' : '25'
+    );
+    const image_url = `https://basket-${basket}.wbbasket.ru/vol${vol}/part${part}/${id}/images/c246x328/1.jpg`;
+
     offers.push(toOffer('wildberries', {
       title: product.name ?? '',
       price,
-      image_url: '',
+      image_url,
       product_url: `https://www.wildberries.ru/catalog/${id}/detail.aspx`,
       features: [product.brand, product.subjectName].filter(Boolean),
       availability: 'unknown',
@@ -370,11 +383,21 @@ async function scrapeOzonPlaywright({ normalizedQuery, limit = 20, timeoutMs = 6
       }
     }
 
-    // Collect from intercepted API or HTML
-    const allProducts = apiProducts.length > 0 ? apiProducts : (() => {
-      const html = page.content ? [] : [];
-      return html;
-    })();
+    // Collect from intercepted API or HTML fallback
+    let allProducts = apiProducts;
+    if (allProducts.length === 0) {
+      try {
+        const html = await page.content();
+        allProducts = parseOzonProducts(html).map(p => ({
+          title: p.name ?? p.title ?? '',
+          price: p.price ?? 0,
+          image_url: p.image ?? p.image_url ?? '',
+          product_url: p.url ?? p.product_url ?? '',
+          features: [],
+          availability: 'unknown',
+        })).filter(p => p.title && p.price > 0);
+      } catch { /* ignore */ }
+    }
 
     const seen = new Set();
     const offers = [];

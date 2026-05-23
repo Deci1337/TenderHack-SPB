@@ -22,6 +22,35 @@ UA = ("Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 "
 PAGE_TIMEOUT = 30_000
 
 
+def _extract_ym_price(p: dict) -> float:
+    """Извлекает цену из объекта YM-продукта, пробуя все известные пути."""
+    def _first_positive(obj) -> float:
+        if isinstance(obj, (int, float)) and obj > 0:
+            return float(obj)
+        if isinstance(obj, str):
+            try:
+                v = float(obj.replace(" ", "").replace("\xa0", ""))
+                if v > 0:
+                    return v
+            except Exception:
+                pass
+        if isinstance(obj, dict):
+            for v in obj.values():
+                r = _first_positive(v)
+                if r > 0:
+                    return r
+        return 0.0
+
+    for field in ("prices", "price", "offer", "salePrice", "minPrice"):
+        val = p.get(field)
+        if val is None:
+            continue
+        r = _first_positive(val)
+        if r > 0:
+            return r
+    return 0.0
+
+
 async def _new_browser_context(pw):
     browser = await pw.chromium.launch(
         headless=True,
@@ -249,39 +278,37 @@ async def search_ym_playwright(query: str, limit: int = 25) -> list[dict]:
     ):
         try:
             blob = json.loads(blob_text)
-            prod_map = blob.get("collections", {}).get("product", {})
-            for p in prod_map.values():
-                if len(results) >= limit:
-                    break
-                name = (p.get("titles") or {}).get("raw") or p.get("name", "")
-                prices = p.get("prices") or {}
-                price_raw = prices.get("min") or prices.get("avg") or p.get("price", 0)
-                try:
-                    price = float(str(price_raw).replace(" ", "").replace("\xa0", ""))
-                except Exception:
+            collections = blob.get("collections") or {}
+            for coll_name, coll_data in collections.items():
+                if not isinstance(coll_data, dict):
                     continue
-                if not name or price <= 0:
-                    continue
-                key = name[:40] + str(price)
-                if key in seen:
-                    continue
-                seen.add(key)
-                pid = p.get("id")
-                slug = p.get("slug", "")
-                source_url = (f"https://market.yandex.ru/product--{slug}/{pid}"
-                              if slug and pid else "https://market.yandex.ru")
-                img = p.get("picture") or p.get("image") or ""
-                if isinstance(img, dict):
-                    img = img.get("url", "")
-                if isinstance(img, str) and img.startswith("//"):
-                    img = "https:" + img
-                results.append({
-                    "name": name[:120],
-                    "price": price,
-                    "image_url": img,
-                    "source_url": source_url,
-                    "characteristics": {},
-                })
+                for p in coll_data.values():
+                    if not isinstance(p, dict) or len(results) >= limit:
+                        break
+                    name = (p.get("titles") or {}).get("raw") or p.get("name", "")
+                    price = _extract_ym_price(p)
+                    if not name or price <= 0 or len(name) < 4:
+                        continue
+                    key = name[:40] + str(price)
+                    if key in seen:
+                        continue
+                    seen.add(key)
+                    pid = p.get("id")
+                    slug = p.get("slug", "")
+                    source_url = (f"https://market.yandex.ru/product--{slug}/{pid}"
+                                  if slug and pid else "https://market.yandex.ru")
+                    img = p.get("picture") or p.get("image") or ""
+                    if isinstance(img, dict):
+                        img = img.get("url", "")
+                    if isinstance(img, str) and img.startswith("//"):
+                        img = "https:" + img
+                    results.append({
+                        "name": name[:120],
+                        "price": price,
+                        "image_url": img,
+                        "source_url": source_url,
+                        "characteristics": {},
+                    })
         except Exception:
             continue
 
