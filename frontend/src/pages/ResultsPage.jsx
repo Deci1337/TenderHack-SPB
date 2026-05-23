@@ -5,14 +5,15 @@ import ProductCard from '../components/ProductCard'
 import ProductModal from '../components/ProductModal'
 import SkeletonCard from '../components/SkeletonCard'
 
-const SOURCE_ORDER = ['wildberries', 'ozon', 'yandex_market', 'runet']
+const SOURCE_ORDER = ['wildberries', 'ozon', 'yandex_market', 'oldi', 'runet']
 const SOURCE_META = {
   wildberries:   { title: 'Wildberries',   color: '#6D28D9', dot: '#7C3AED', light: '#F5F3FF' },
   ozon:          { title: 'Ozon',          color: '#1D4ED8', dot: '#2563EB', light: '#EFF6FF' },
   yandex_market: { title: 'Яндекс Маркет', color: '#92400E', dot: '#D97706', light: '#FFFBEB' },
+  oldi:          { title: 'OLDI',          color: '#B91C1C', dot: '#DC2626', light: '#FEF2F2' },
   runet:         { title: 'Рунет',         color: '#065F46', dot: '#059669', light: '#ECFDF5' },
 }
-const SOURCE_DELAYS = { wildberries: 800, ozon: 2200, yandex_market: 3800, runet: 6500 }
+const SOURCE_DELAYS = { wildberries: 800, ozon: 2200, yandex_market: 3800, oldi: 5000, runet: 6500 }
 
 const CARD_WIDTH = 150  // px ширина карточки
 const CARD_GAP   = 12   // px зазор
@@ -168,6 +169,7 @@ export default function ResultsPage() {
     fetchSource('wildberries',   '/api/search/wildberries',   SOURCE_DELAYS.wildberries)
     fetchSource('ozon',          '/api/search/ozon',          SOURCE_DELAYS.ozon)
     fetchSource('yandex_market', '/api/search/yandex_market', SOURCE_DELAYS.yandex_market)
+    fetchSource('oldi',          '/api/search/oldi',          SOURCE_DELAYS.oldi)
     fetchSource('runet',         '/api/search/runet',         SOURCE_DELAYS.runet)
 
     // таймауты-гарантии: если API висит — всё равно показываем секцию

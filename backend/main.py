@@ -160,6 +160,14 @@ async def search_ym(q: str = "", region: str = "Москва"):
     return await _search_with_fallback("yandex_market", corrected, region, _py_ym)
 
 
+@app.get("/api/search/oldi")
+async def search_oldi(q: str = "", region: str = "Москва"):
+    if not q.strip():
+        return {"products": [], "liveHit": False}
+    corrected = correct(q)
+    return await _call_parser("oldi", corrected, region)
+
+
 @app.get("/health")
 async def health():
     parser_ok = False

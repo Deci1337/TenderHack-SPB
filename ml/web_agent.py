@@ -347,7 +347,7 @@ def extract_jsonld(html: str) -> dict | None:
                 try:
                     return {
                         "name": name,
-                        "price": float(str(price).replace(" ", "").replace(",", ".")),
+                        "price": float(str(price).replace("\xa0", "").replace(" ", "").replace(" ", "").replace(",", ".")),
                         "image_url": str(image) if image else None,
                         "characteristics": chars,
                         "method": "jsonld",
@@ -389,7 +389,7 @@ def extract_opengraph(html: str) -> dict | None:
         return None
 
     try:
-        price = float(re.sub(r'[^\d.]', '', price_str.replace(",", ".")))
+        price = float(re.sub(r'[^\d.]', '', price_str.replace("\xa0", "").replace(" ", "").replace(",", ".")))
     except ValueError:
         return None
 
@@ -470,10 +470,10 @@ async def extract_from_dom(page, url: str) -> dict | None:
             return None
 
         # Чистим цену
-        nums = re.findall(r'\d[\d\s]*', price_text)
+        nums = re.findall(r'\d[\d\s\xa0]*', price_text)
         if not nums:
             return None
-        price = float(nums[0].replace(" ", ""))
+        price = float(re.sub(r'[^\d]', '', nums[0]))
         if price <= 0 or price > 10_000_000:
             return None
 
@@ -730,7 +730,7 @@ async def search_runet(query: str, region: str = "Москва") -> list[RunetPr
     Полный пайплайн: DDG → Playwright → извлечение → валидация.
     Возвращает до MAX_PRODUCTS товаров с image_url, price, characteristics.
     """
-    ddg_query = f"{query} {region}" if region else query
+    ddg_query = f"{query} купить цена {region}" if region else f"{query} купить цена"
     scored_urls = await ddg_search(ddg_query)
     if not scored_urls:
         return []

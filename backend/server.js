@@ -10,6 +10,7 @@ import {
   scrapeOzon,
   scrapeYandexMarket,
 } from './src/lib/playwright-scraper.js'
+import { fetchOldiOffers } from './src/lib/oldi.js'
 
 const PORT = process.env.PARSER_PORT ?? 8008
 
@@ -29,6 +30,24 @@ function resolveCity(region) {
   return MAP[region] ?? region ?? 'Москва'
 }
 
+const TITLE_SUFFIXES = [
+  /\s*—\s*купить по лучшей цене.*/i,
+  /\s*—\s*купить в интернет.*/i,
+  /\s*—\s*цена,.*/i,
+  /\s*\|\s*цены,.*/i,
+  /\s*\|\s*купить.*/i,
+  /\s*\/\s*[А-Я][а-я]+ [А-Я][а-я]+\s*$/,
+]
+function cleanTitle(name) {
+  if (!name) return ''
+  let s = name.trim()
+  // Strip "Category/ Product name" prefix (OLDI DataLayer format)
+  const slashIdx = s.indexOf('/ ')
+  if (slashIdx > 0 && slashIdx < 50) s = s.slice(slashIdx + 2).trim()
+  for (const re of TITLE_SUFFIXES) s = s.replace(re, '')
+  return s.trim()
+}
+
 function offerToProduct(offer, source, idx) {
   const features = offer.features ?? []
   const chars = {}
@@ -41,7 +60,7 @@ function offerToProduct(offer, source, idx) {
   }
   return {
     id: `${source}_${idx}`,
-    name: offer.title ?? '',
+    name: cleanTitle(offer.title ?? ''),
     price: offer.price ?? 0,
     image_url: offer.image_url ?? '',
     source_url: offer.product_url ?? '',
@@ -53,10 +72,16 @@ function offerToProduct(offer, source, idx) {
   }
 }
 
+async function scrapeOldi({ normalizedQuery, limit, timeoutMs }) {
+  const res = await fetchOldiOffers({ normalizedQuery, limit, timeoutMs })
+  return res
+}
+
 const SCRAPERS = {
   wildberries: scrapeWildberries,
   ozon: scrapeOzon,
   yandex_market: scrapeYandexMarket,
+  oldi: scrapeOldi,
 }
 
 const server = http.createServer(async (req, res) => {
