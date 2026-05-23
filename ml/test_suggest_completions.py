@@ -81,7 +81,7 @@ def test_prefix(prefix: str, limit: int):
 def run_all_tests():
     """Запускает все тесты."""
     print("\n" + "=" * 60)
-    print("🚀 ТЕСТИРОВАНИЕ SUGGEST_COMPLETIONS")
+    print("ТЕСТИРОВАНИЕ SUGGEST_COMPLETIONS")
     print("=" * 60)
     
     total = len(PREFIXES)
@@ -94,11 +94,9 @@ def run_all_tests():
                 success += 1
             test_prefix(prefix, limit)
         except Exception as e:
-            print(f"\n❌ Ошибка для префикса '{prefix}': {e}")
+            print(f"\nОшибка для префикса '{prefix}': {e}")
     
-    print("\n" + "=" * 60)
-    print(f"📊 РЕЗУЛЬТАТЫ: {success}/{total} префиксов успешно")
-    print("=" * 60)
+    print(f"РЕЗУЛЬТАТЫ: {success}/{total} префиксов успешно")
 
 
 def test_single():
@@ -118,7 +116,7 @@ def test_with_debug(prefix: str, limit: int = 5):
     from ml.llm_service import _SUGGEST_PROMPT, _run_chat_completion, _extract_json_object, _SUGGEST_CATEGORIES
     
     print(f"\n{'=' * 60}")
-    print(f"🐛 ДЕТАЛЬНЫЙ ТЕСТ: '{prefix}'")
+    print(f"ДЕТАЛЬНЫЙ ТЕСТ: '{prefix}'")
     print(f"{'=' * 60}")
     
     # Очищаем префикс
