@@ -434,13 +434,15 @@ function parseYandexMarketProducts(html) {
   while ((m = noframesRe.exec(html)) !== null) {
     try {
       const blob = JSON.parse(m[1]);
-      const prodMap = blob?.collections?.product ?? {};
-      for (const [id, p] of Object.entries(prodMap)) {
-        if (p && (p.titles?.raw || p.titles?.highlighted)) {
-          products.push({ _ymId: id, ...p });
+      const collections = blob?.collections ?? {};
+      for (const collData of Object.values(collections)) {
+        if (!collData || typeof collData !== 'object') continue;
+        for (const [id, p] of Object.entries(collData)) {
+          if (p && typeof p === 'object' && (p.titles?.raw || p.titles?.highlighted)) {
+            products.push({ _ymId: id, ...p });
+          }
         }
       }
-      // offers enrich prices but products already have prices.min — skip dedup complexity.
     } catch { /* ignore */ }
   }
   if (products.length > 0) return products;

@@ -81,7 +81,7 @@ const server = http.createServer(async (req, res) => {
   const source = url.searchParams.get('source') ?? ''
   const q = url.searchParams.get('q') ?? ''
   const region = url.searchParams.get('region') ?? 'Москва'
-  const limit = Math.min(Number(url.searchParams.get('limit') ?? '8'), 10)
+  const limit = Math.min(Number(url.searchParams.get('limit') ?? '10'), 10)
 
   if (!SCRAPERS[source]) {
     res.writeHead(400)
