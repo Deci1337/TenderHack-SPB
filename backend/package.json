@@ -1,0 +1,26 @@
+{
+  "name": "tenderhack-spb-backend",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "test": "node --test",
+    "cli": "node src/cli.js",
+    "pdf:ingest": "node src/pdf-ingest.js",
+    "playwright:collect": "python3 scripts/playwright_collect.py",
+    "demo": "node src/cli.js \"айфон 15\" --limit 3 --verbose",
+    "demo:json": "node src/cli.js \"айфон 15\" --limit 3 --json",
+    "demo:schema": "node src/cli.js \"кофемашина\" --limit 10 --schema",
+    "wb:token-provider": "node src/wb-token-provider.js",
+    "test:parsers": "node scripts/test_parsers.js",
+    "demo:live": "node scripts/test_parsers.js \"кофемашина\"",
+    "stealth:up": "docker run -d --name stealth-browser -p 9377:9377 ghcr.io/jo-inc/camofox-browser:latest",
+    "stealth:down": "docker rm -f stealth-browser",
+    "stealth:health": "curl -sS http://127.0.0.1:9377/health"
+  },
+  "devDependencies": {
+    "playwright": "^1.60.0"
+  },
+  "dependencies": {
+    "pdfjs-dist": "^5.4.449"
+  }
+}
