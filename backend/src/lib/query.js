@@ -113,7 +113,17 @@ export function scoreOffer(queryTokens, offer) {
   let score = 0;
   let matches = 0;
   for (const token of queryTokens) {
-    if (haystack.has(token)) {
+    let matched = haystack.has(token);
+    if (!matched && token.length >= 4) {
+      // Substring match: handles Russian morphology (карандаш → карандашей, etc.)
+      for (const t of haystack) {
+        if (t.includes(token) || (t.length >= 4 && token.includes(t))) {
+          matched = true;
+          break;
+        }
+      }
+    }
+    if (matched) {
       matches += 1;
       score += 20;
     }

@@ -107,15 +107,12 @@ const server = http.createServer(async (req, res) => {
       enrichSpecs: false,
     })
 
-    // Фильтр мусора: цена > 0, хотя бы 40% токенов запроса совпадают.
-    // image_url проверяем мягко — WB генерирует его по ID, для Ozon/YM может отсутствовать.
-    const nTokens = normalizedQ.tokens.length
-    const minScore = nTokens > 0 ? Math.max(20, Math.ceil(nTokens * 0.4) * 20) : 0
+    // Фильтр мусора: только цена > 0. Поисковики WB/YM/Ozon уже ранжируют по релевантности,
+    // дополнительный порог relevance_score срезал морфологические формы (карандашей ≠ карандаш).
     const relevant = (result.offers ?? [])
       .filter(o => (o.price ?? 0) > 0)
-      .filter(o => nTokens === 0 || (o.relevance_score ?? 0) >= minScore)
       .sort((a, b) => (b.relevance_score ?? 0) - (a.relevance_score ?? 0))
-      .slice(0, 25)
+      .slice(0, 30)
 
     // Из релевантных по запросу — выбираем медианные по цене (методика НМЦК).
     const median = selectMedianProducts(relevant, limit)
