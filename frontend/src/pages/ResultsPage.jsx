@@ -146,7 +146,7 @@ export default function ResultsPage() {
         const res = await fetch(`/api/search/runet?q=${encodeURIComponent(query)}&region=${encodeURIComponent(region)}`)
         if (res.ok) {
           const data = await res.json()
-          setRunetProducts(data)
+          setRunetProducts(data.products ?? data)
         }
       } catch {
         // бэкенд недоступен — просто пустой источник
