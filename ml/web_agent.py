@@ -83,10 +83,14 @@ BLACKLISTED_DOMAINS = {
     "duckduckgo.com",
 }
 
-# Признаки агрегатора отзывов / форума / новостей — отсекаем
+# Признаки агрегатора отзывов / форума / новостей / сравнения цен — отсекаем
 AGGREGATOR_MARKERS = (
     "otzov", "otziv", "irecommend", "forum", "obzor", "review",
     "wiki", "blog", "news", "rambler", "lenta", "rbc",
+    # Агрегаторы цен и сравнение — у них много цен, но не магазин
+    "sravni", "price", "preis", "gde-", "gdekupit", "kupitoffer",
+    "pricelist", "pricespy", "hotline", "price.ru", "yandex.ru/price",
+    "market.yandex", "shopsearch",
 )
 
 # Признаки магазина в домене — повышаем скор
@@ -639,20 +643,30 @@ async def process_url(page, url: str, query: str, use_qwen: bool = False) -> Run
     if not html:
         return None
 
-    # Проверяем: может это листинг (много цен)? Ищем карточку товара.
-    is_listing = await page.evaluate("""() => {
-        const prices = document.querySelectorAll('[class*="price"],[itemprop="price"]')
-        return prices.length > 4
+    # Проверяем заголовок на агрегатор цен
+    page_title = (await page.title()).lower()
+    aggregator_title_signs = ("где дешевле", "сравнить цены", "сравнение цен", "лучшая цена", "где купить дешевле")
+    if any(s in page_title for s in aggregator_title_signs):
+        logger.info("Агрегатор по заголовку, пропускаем: %s", url)
+        return None
+
+    # Проверяем: может это листинг/агрегатор (много цен)? Ищем карточку товара.
+    price_count = await page.evaluate("""() => {
+        return document.querySelectorAll('[class*="price"],[itemprop="price"],[data-price]').length
     }""")
 
-    if is_listing:
+    if price_count > 4:
         product_url = await _find_product_link(page, url)
         if product_url and product_url != url:
             logger.info("Листинг → переходим на карточку: %s", product_url)
             html = await load_page(page, product_url)
             if not html:
                 return None
-            url = product_url  # обновляем source_url
+            url = product_url
+        else:
+            # Агрегатор цен без карточки — парсить бессмысленно
+            logger.info("Агрегатор/листинг без карточки, пропускаем: %s", url)
+            return None
 
     # Пробуем по приоритету
     data = (

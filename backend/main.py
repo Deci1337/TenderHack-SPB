@@ -1,11 +1,16 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-import sys, os
+import sys, os, asyncio, json, logging
+import httpx
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', 'ml'))
 from suggestions import get_suggestions
 from web_agent import search_runet
 from spell_checker import correct
+
+logger = logging.getLogger(__name__)
+
+PARSER_BASE = os.getenv("PARSER_SERVER_URL", "http://localhost:8008")
 
 # expand_query тянет Qwen модель (~8 ГБ). Включается после `python ml/download_model.py`
 # Чтобы включить — поставь USE_LLM=1 в окружении
@@ -87,6 +92,51 @@ async def search_runet_endpoint(q: str = "", region: str = "Москва"):
     }
 
 
+async def _call_parser(source: str, q: str, region: str, limit: int = 5) -> dict:
+    """Вызывает Node.js parser server. Возвращает {products, liveHit}."""
+    try:
+        async with httpx.AsyncClient(timeout=50.0) as client:
+            r = await client.get(
+                f"{PARSER_BASE}/search",
+                params={"source": source, "q": q, "region": region, "limit": limit},
+            )
+            return r.json()
+    except Exception as e:
+        logger.warning("Parser server unavailable for %s: %s", source, e)
+        return {"source": source, "products": [], "liveHit": False}
+
+
+@app.get("/api/search/wildberries")
+async def search_wb(q: str = "", region: str = "Москва"):
+    if not q.strip():
+        return {"products": [], "liveHit": False}
+    corrected = correct(q)
+    return await _call_parser("wildberries", corrected, region)
+
+
+@app.get("/api/search/ozon")
+async def search_ozon(q: str = "", region: str = "Москва"):
+    if not q.strip():
+        return {"products": [], "liveHit": False}
+    corrected = correct(q)
+    return await _call_parser("ozon", corrected, region)
+
+
+@app.get("/api/search/yandex_market")
+async def search_ym(q: str = "", region: str = "Москва"):
+    if not q.strip():
+        return {"products": [], "liveHit": False}
+    corrected = correct(q)
+    return await _call_parser("yandex_market", corrected, region)
+
+
 @app.get("/health")
-def health():
-    return {"status": "ok"}
+async def health():
+    parser_ok = False
+    try:
+        async with httpx.AsyncClient(timeout=3.0) as client:
+            r = await client.get(f"{PARSER_BASE}/health")
+            parser_ok = r.json().get("ok", False)
+    except Exception:
+        pass
+    return {"status": "ok", "parser_server": parser_ok}

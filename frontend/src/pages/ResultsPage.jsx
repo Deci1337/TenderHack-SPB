@@ -1,7 +1,6 @@
 import { useState, useEffect, useMemo, useRef } from 'react'
 import { useSearchParams, useNavigate } from 'react-router-dom'
 import { ArrowLeft, ChevronLeft, ChevronRight } from 'lucide-react'
-import { MOCK_PRODUCTS } from '../data/mockProducts'
 import ProductCard from '../components/ProductCard'
 import ProductModal from '../components/ProductModal'
 import SkeletonCard from '../components/SkeletonCard'
@@ -128,8 +127,8 @@ export default function ResultsPage() {
 
   const [loadedSources, setLoadedSources] = useState([])
   const [modalIndex, setModalIndex] = useState(null)
-  const [runetProducts, setRunetProducts] = useState([])
-  const [correction, setCorrection] = useState(null) // {original, corrected}
+  const [sourceProducts, setSourceProducts] = useState({})  // source → products[]
+  const [correction, setCorrection] = useState(null)
 
   useEffect(() => {
     fetch(`/api/correct?q=${encodeURIComponent(query)}`)
@@ -140,44 +139,56 @@ export default function ResultsPage() {
 
   useEffect(() => {
     setLoadedSources([])
-    setRunetProducts([])
+    setSourceProducts({})
 
-    // WB, Ozon, ЯМ — моки с задержкой (до интеграции бэкенда)
-    const timers = SOURCE_ORDER.filter(s => s !== 'runet').map(src =>
-      setTimeout(() => setLoadedSources(prev => [...prev, src]), SOURCE_DELAYS[src])
-    )
+    const q = encodeURIComponent(query)
+    const r = encodeURIComponent(region)
 
-    // Рунет — реальный API
-    const runetTimer = setTimeout(async () => {
+    const fetchSource = async (src, apiPath, delay) => {
+      await new Promise(res => setTimeout(res, delay))
       try {
-        const res = await fetch(`/api/search/runet?q=${encodeURIComponent(query)}&region=${encodeURIComponent(region)}`)
-        if (res.ok) {
-          const data = await res.json()
-          setRunetProducts(data.products ?? data)
+        const resp = await fetch(`${apiPath}?q=${q}&region=${r}`)
+        if (resp.ok) {
+          const data = await resp.json()
+          const products = (data.products ?? data).map((p, i) => ({
+            ...p,
+            id: p.id ?? `${src}_${i}`,
+            source: p.source ?? src,
+          }))
+          setSourceProducts(prev => ({ ...prev, [src]: products }))
         }
       } catch {
-        // бэкенд недоступен — просто пустой источник
+        // источник недоступен
       } finally {
-        setLoadedSources(prev => [...prev, 'runet'])
+        setLoadedSources(prev => [...prev, src])
       }
-    }, SOURCE_DELAYS['runet'])
+    }
 
-    return () => { timers.forEach(clearTimeout); clearTimeout(runetTimer) }
+    const controllers = []
+    fetchSource('wildberries',   '/api/search/wildberries',   SOURCE_DELAYS.wildberries)
+    fetchSource('ozon',          '/api/search/ozon',          SOURCE_DELAYS.ozon)
+    fetchSource('yandex_market', '/api/search/yandex_market', SOURCE_DELAYS.yandex_market)
+    fetchSource('runet',         '/api/search/runet',         SOURCE_DELAYS.runet)
+
+    // таймауты-гарантии: если API висит — всё равно показываем секцию
+    const fallbackTimers = SOURCE_ORDER.map(src =>
+      setTimeout(() => setLoadedSources(prev => prev.includes(src) ? prev : [...prev, src]),
+        SOURCE_DELAYS[src] + 55000)
+    )
+
+    return () => fallbackTimers.forEach(clearTimeout)
   }, [query, region])
 
   const allProducts = useMemo(() => {
-    const mocks = MOCK_PRODUCTS.filter(p => {
-      if (!loadedSources.includes(p.source)) return false
-      if (p.source === 'runet') return false // руnet идёт из API
-      return true
-    })
-    const runet = loadedSources.includes('runet') ? runetProducts : []
-    return [...mocks, ...runet].filter(p => {
-      if (priceFrom && p.price < priceFrom) return false
-      if (priceTo   && p.price > priceTo)   return false
-      return true
-    })
-  }, [loadedSources, runetProducts, priceFrom, priceTo])
+    return SOURCE_ORDER
+      .filter(src => loadedSources.includes(src))
+      .flatMap(src => sourceProducts[src] ?? [])
+      .filter(p => {
+        if (priceFrom && p.price < priceFrom) return false
+        if (priceTo   && p.price > priceTo)   return false
+        return true
+      })
+  }, [loadedSources, sourceProducts, priceFrom, priceTo])
 
   const allLoaded = loadedSources.length === SOURCE_ORDER.length
 
