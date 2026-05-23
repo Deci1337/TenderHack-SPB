@@ -1,7 +1,7 @@
 export default function SkeletonCard() {
   return (
     <div style={{
-      background: '#FFFFFF', borderRadius: '12px',
+      background: '#FFFFFF', borderRadius: '14px',
       border: '1.5px solid #F1F5F9', overflow: 'hidden',
     }}>
       <div style={{
@@ -10,10 +10,10 @@ export default function SkeletonCard() {
         backgroundSize: '200% 100%',
         animation: 'shimmer 1.4s infinite',
       }} />
-      <div style={{ padding: '8px' }}>
-        <div style={{ height: '9px', background: '#F1F5F9', borderRadius: '4px', marginBottom: '5px' }} />
-        <div style={{ height: '9px', background: '#F1F5F9', borderRadius: '4px', width: '70%', marginBottom: '10px' }} />
-        <div style={{ height: '14px', background: '#F1F5F9', borderRadius: '4px', width: '50%' }} />
+      <div style={{ padding: '14px', minHeight: '110px' }}>
+        <div style={{ height: '12px', background: '#F1F5F9', borderRadius: '4px', marginBottom: '8px' }} />
+        <div style={{ height: '12px', background: '#F1F5F9', borderRadius: '4px', width: '70%', marginBottom: '16px' }} />
+        <div style={{ height: '20px', background: '#F1F5F9', borderRadius: '4px', width: '50%' }} />
       </div>
       <style>{`
         @keyframes shimmer {

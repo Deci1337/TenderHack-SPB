@@ -22,6 +22,33 @@ BASE_HEADERS = {
 }
 
 
+def select_median_products(items: list, count: int = 8) -> list:
+    """
+    Из набора кандидатов выбирает `count` товаров вокруг медианной цены.
+    Обрезает по 10% выбросов с каждого края (фейки за 1₽, опт, премиум).
+    Методика НМЦК: цена сопоставимых предложений ≈ медиана рыночных.
+    """
+    valid = [p for p in items if getattr(p, "price", 0) > 0]
+    if len(valid) <= count:
+        return valid
+    s = sorted(valid, key=lambda p: p.price)
+    drop = len(s) // 10
+    core = s[drop: len(s) - drop] if drop > 0 else s
+    if len(core) <= count:
+        return core
+    mid = len(core) // 2
+    half = count // 2
+    start = mid - half
+    end = start + count
+    if start < 0:
+        end -= start
+        start = 0
+    if end > len(core):
+        start -= end - len(core)
+        end = len(core)
+    return core[max(0, start): end]
+
+
 @dataclass
 class MarketProduct:
     name: str
@@ -66,7 +93,7 @@ def _wb_image(nm_id: int) -> str:
     return f"https://basket-{basket:02d}.wbbasket.ru/vol{vol}/part{part}/{nm_id}/images/c516x688/1.jpg"
 
 
-async def search_wildberries(query: str, region: str = "Москва", limit: int = 5) -> list[MarketProduct]:
+async def search_wildberries(query: str, region: str = "Москва", limit: int = 8) -> list[MarketProduct]:
     dests = ["-1257786", "-1275551", "12358062", "-446031"]
     user_agents = [
         "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/144.0.0.0 Safari/537.36",
@@ -115,12 +142,13 @@ async def search_wildberries(query: str, region: str = "Москва", limit: in
                         continue
 
                     result = []
-                    for p in products[:limit]:
+                    # Тянем 25 кандидатов чтобы было из чего выбрать медиану.
+                    for p in products[:25]:
                         nm_id = p.get("id") or p.get("nmId") or p.get("nmID")
                         if not nm_id:
                             continue
                         name = p.get("name", "").strip()
-                        # Цена: sizes[0].price.product (в копейках) или salePriceU
+                        # Цена: sizes[0].price.product (всегда в копейках) или salePriceU/priceU (тоже копейки)
                         sizes = p.get("sizes", [])
                         price_raw = (
                             (sizes[0].get("price", {}).get("product") if sizes else None)
@@ -128,7 +156,7 @@ async def search_wildberries(query: str, region: str = "Москва", limit: in
                             or p.get("priceU")
                             or 0
                         )
-                        price = price_raw / 100 if price_raw > 1000 else price_raw
+                        price = price_raw / 100
                         if not name or price <= 0:
                             continue
                         chars = {}
@@ -145,11 +173,27 @@ async def search_wildberries(query: str, region: str = "Москва", limit: in
                             characteristics=chars,
                         ))
                     if result:
-                        logger.info("WB: %d товаров для '%s' (dest=%s)", len(result), query, dest)
+                        result = select_median_products(result, limit)
+                        logger.info("WB: %d медианных товаров для '%s' (dest=%s)", len(result), query, dest)
                         return result
                 except Exception as e:
                     logger.debug("WB attempt failed: %s", e)
                 await asyncio.sleep(0.6)
+
+    # httpx упёрся в антибот (498/429) — пробуем Playwright
+    logger.info("WB: httpx заблокирован, переключаемся на Playwright")
+    try:
+        from marketplace_playwright import search_wb_playwright
+        raw = await search_wb_playwright(query, limit=25)
+        products = [MarketProduct(
+            name=r["name"], price=r["price"], image_url=r["image_url"],
+            source_url=r["source_url"], source="wildberries",
+            characteristics=r.get("characteristics", {}),
+        ) for r in raw]
+        if products:
+            return select_median_products(products, limit)
+    except Exception as e:
+        logger.warning("WB Playwright fallback failed: %s", e)
 
     logger.warning("WB: ничего не найдено для '%s'", query)
     return []
@@ -159,7 +203,7 @@ async def search_wildberries(query: str, region: str = "Москва", limit: in
 # OZON
 # ─────────────────────────────────────────────────────────────
 
-async def search_ozon(query: str, region: str = "Москва", limit: int = 5) -> list[MarketProduct]:
+async def search_ozon(query: str, region: str = "Москва", limit: int = 8) -> list[MarketProduct]:
     q = quote(query)
     url = f"https://www.ozon.ru/api/entrypoint-api.bx/page/json/v2?url=%2Fsearch%2F%3Ftext%3D{q}%26layout_container%3DsearchResultsV2"
     headers = {
@@ -187,14 +231,33 @@ async def search_ozon(query: str, region: str = "Москва", limit: int = 5) 
             if not widgets:
                 widgets = data  # попробуем весь ответ
 
-            products = _extract_ozon_items(widgets, limit)
+            # Тянем 25 кандидатов, потом выбираем медианные.
+            products = _extract_ozon_items(widgets, 25)
             if products:
-                return products
+                return select_median_products(products, limit)
 
     except Exception as e:
         logger.warning("Ozon API error: %s", e)
 
-    return await _search_ozon_html(query, limit)
+    products = await _search_ozon_html(query, 25)
+    if products:
+        return select_median_products(products, limit)
+
+    # httpx путь не сработал (403/captcha) — Playwright
+    logger.info("Ozon: httpx заблокирован, переключаемся на Playwright")
+    try:
+        from marketplace_playwright import search_ozon_playwright
+        raw = await search_ozon_playwright(query, limit=25)
+        products = [MarketProduct(
+            name=r["name"], price=r["price"], image_url=r["image_url"],
+            source_url=r["source_url"], source="ozon",
+            characteristics=r.get("characteristics", {}),
+        ) for r in raw]
+        if products:
+            return select_median_products(products, limit)
+    except Exception as e:
+        logger.warning("Ozon Playwright fallback failed: %s", e)
+    return []
 
 
 def _extract_ozon_items(data: dict, limit: int) -> list[MarketProduct]:
@@ -303,53 +366,58 @@ def _extract_ozon_items_from_next(node, seen, results, limit):
 # ЯНДЕКС МАРКЕТ
 # ─────────────────────────────────────────────────────────────
 
-async def search_yandex_market(query: str, region: str = "Москва", limit: int = 5) -> list[MarketProduct]:
-    # YM: пробуем internal API (используется мобильным приложением)
+YM_RS_TOKEN = "eJwzEv_EKMLBKLDwEKsEg8azbh6NVUdYNT6fYQUAWiMIFg,,"
+
+
+async def search_yandex_market(query: str, region: str = "Москва", limit: int = 8) -> list[MarketProduct]:
     q = quote(query)
     region_id = _ym_region_id(region)
 
+    # rs-токен обходит ASN/VPN-блокировку YM при прямом HTTP fetch
+    rs = quote(YM_RS_TOKEN)
     endpoints = [
-        # Внутренний search API YM
-        f"https://market.yandex.ru/api/search?text={q}&regionId={region_id}&page=1&count={limit}&how=dpop",
-        # Альтернатива — виджет поиска
+        f"https://market.yandex.ru/search?text={q}&rs={rs}&lr={region_id}",
         f"https://market.yandex.ru/search?text={q}&lr={region_id}",
     ]
 
-    headers_api = {
-        **BASE_HEADERS,
-        "Accept": "application/json, text/plain, */*",
-        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/144.0.0.0 Safari/537.36",
-        "Referer": "https://market.yandex.ru/",
-        "x-requested-with": "XMLHttpRequest",
-    }
     headers_html = {
         **BASE_HEADERS,
-        "Accept": "text/html,application/xhtml+xml",
-        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/144.0.0.0 Safari/537.36",
+        "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+        "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36",
+        "sec-fetch-dest": "document",
+        "sec-fetch-mode": "navigate",
+        "sec-fetch-site": "none",
     }
 
     async with httpx.AsyncClient(timeout=TIMEOUT, follow_redirects=True) as client:
-        # Пробуем API
-        try:
-            r = await client.get(endpoints[0], headers=headers_api)
-            if r.status_code == 200 and r.headers.get("content-type", "").startswith("application/json"):
-                data = r.json()
-                products = _extract_ym_items(data, limit)
-                if products:
-                    return products
-        except Exception as e:
-            logger.debug("YM API error: %s", e)
+        for endpoint in endpoints:
+            try:
+                r = await client.get(endpoint, headers=headers_html)
+                if r.status_code == 200:
+                    products = _parse_ym_html(r.text, 25)
+                    if products:
+                        products = select_median_products(products, limit)
+                        logger.info("YM: %d медианных товаров для '%s'", len(products), query)
+                        return products
+            except Exception as e:
+                logger.debug("YM error: %s", e)
 
-        # Fallback: HTML со встроенным JSON
-        try:
-            r = await client.get(endpoints[1], headers=headers_html)
-            if r.status_code == 200:
-                products = _parse_ym_html(r.text, limit)
-                if products:
-                    return products
-        except Exception as e:
-            logger.debug("YM HTML error: %s", e)
+    # httpx путь не сработал — Playwright fallback
+    logger.info("YM: httpx заблокирован, переключаемся на Playwright")
+    try:
+        from marketplace_playwright import search_ym_playwright
+        raw = await search_ym_playwright(query, limit=25)
+        products = [MarketProduct(
+            name=r["name"], price=r["price"], image_url=r["image_url"],
+            source_url=r["source_url"], source="yandex_market",
+            characteristics=r.get("characteristics", {}),
+        ) for r in raw]
+        if products:
+            return select_median_products(products, limit)
+    except Exception as e:
+        logger.warning("YM Playwright fallback failed: %s", e)
 
+    logger.warning("YM: ничего не найдено для '%s'", query)
     return []
 
 
@@ -413,27 +481,57 @@ def _extract_ym_items(data: dict, limit: int) -> list[MarketProduct]:
 
 
 def _parse_ym_html(html: str, limit: int) -> list[MarketProduct]:
-    """Ищет JSON в скриптах страницы YM."""
-    # YM встраивает данные в window.__data или __NEXT_DATA__
-    patterns = [
-        r'<script[^>]*>\s*window\.__data\s*=\s*(\{.*?\});\s*</script>',
-        r'<script id="__NEXT_DATA__"[^>]*>(.*?)</script>',
-        r'window\["__NUXT__"\]\s*=\s*(\(.*?\))\s*;',
-    ]
-    for pat in patterns:
-        m = re.search(pat, html, re.DOTALL)
-        if m:
-            try:
-                data = json.loads(m.group(1))
-                products = _extract_ym_items(data, limit)
-                if products:
-                    return products
-            except Exception:
-                continue
-
-    # Последний шанс: ищем JSON-LD Product
+    """Парсит HTML страницы YM. Приоритет: noframes apiary → __NEXT_DATA__ → JSON-LD."""
     results = []
-    seen = set()
+    seen: set[str] = set()
+
+    # 1) YM встраивает данные товаров в <noframes data-apiary="patch"> блоки
+    for blob_text in re.findall(r'<noframes[^>]+data-apiary="patch"[^>]*>(.*?)</noframes>', html, re.DOTALL):
+        try:
+            blob = json.loads(blob_text)
+            prod_map = blob.get("collections", {}).get("product", {})
+            for p in prod_map.values():
+                if len(results) >= limit:
+                    break
+                name = (p.get("titles") or {}).get("raw") or p.get("name", "")
+                prices = p.get("prices") or {}
+                price_raw = prices.get("min") or prices.get("avg") or p.get("price", 0)
+                try:
+                    price = float(str(price_raw).replace(" ", "").replace("\xa0", ""))
+                except Exception:
+                    continue
+                if not name or price <= 0:
+                    continue
+                key = name[:40] + str(price)
+                if key in seen:
+                    continue
+                seen.add(key)
+                pid = p.get("id")
+                slug = p.get("slug", "")
+                url = f"https://market.yandex.ru/product--{slug}/{pid}" if slug and pid else "https://market.yandex.ru"
+                img = p.get("picture") or p.get("image") or ""
+                if isinstance(img, dict):
+                    img = img.get("url", "")
+                results.append(MarketProduct(
+                    name=name[:120], price=price, image_url=img,
+                    source_url=url, source="yandex_market",
+                ))
+        except Exception:
+            continue
+    if results:
+        return results
+
+    # 2) __NEXT_DATA__
+    m = re.search(r'<script id="__NEXT_DATA__"[^>]*>(.*?)</script>', html, re.DOTALL)
+    if m:
+        try:
+            products = _extract_ym_items(json.loads(m.group(1)), limit)
+            if products:
+                return products
+        except Exception:
+            pass
+
+    # 3) JSON-LD Product
     for block in re.findall(r'<script[^>]+type="application/ld\+json"[^>]*>(.*?)</script>', html, re.DOTALL):
         try:
             data = json.loads(block)

@@ -247,7 +247,7 @@ async function scrapeViaStealth({ source, searchUrl, extractItems, normalizedQue
 
 function scrapeWildberriesStealth({ normalizedQuery, limit = 20, timeoutMs = 60000, enrichSpecs = false, specsTopN = 5, geo } = {}) {
   const searchUrl = withWildberriesRegion(
-    `https://www.wildberries.ru/catalog/0/search.aspx?search=${encodeURIComponent(normalizedQuery.normalized)}`,
+    `https://www.wildberries.ru/catalog/0/search.aspx?search=${encodeURIComponent(normalizedQuery.original)}`,
     geo,
   );
   return scrapeViaStealth({
@@ -269,7 +269,7 @@ function scrapeOzonStealth({ normalizedQuery, limit = 20, timeoutMs = 60000, enr
   return scrapeViaStealth({
     source: 'ozon',
     geo,
-    searchUrl: `https://www.ozon.ru/search/?text=${encodeURIComponent(normalizedQuery.normalized)}&from_global=true`,
+    searchUrl: `https://www.ozon.ru/search/?text=${encodeURIComponent(normalizedQuery.original)}&from_global=true`,
     extractItems: extractOzonItems,
     normalizedQuery,
     limit,
@@ -284,7 +284,7 @@ const YM_RS_TOKEN = 'eJwzEv_EKMLBKLDwEKsEg8azbh6NVUdYNT6fYQUAWiMIFg,,';
 
 function scrapeYandexMarketStealth({ normalizedQuery, limit = 20, timeoutMs = 60000, enrichSpecs = false, specsTopN = 5, geo } = {}) {
   const searchUrl = withYandexMarketRegion(
-    `https://market.yandex.ru/search?text=${encodeURIComponent(normalizedQuery.normalized)}&rs=${encodeURIComponent(YM_RS_TOKEN)}`,
+    `https://market.yandex.ru/search?text=${encodeURIComponent(normalizedQuery.original)}&rs=${encodeURIComponent(YM_RS_TOKEN)}`,
     geo,
   );
   return scrapeViaStealth({

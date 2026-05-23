@@ -26,7 +26,7 @@ http://localhost:8009
   "price":           7490.0,            // number (рублей, без копеек)
   "image_url":       "https://...",     // string | null
   "source_url":      "https://...",     // string — ссылка на карточку товара
-  "source":          "wildberries",     // "wildberries"|"ozon"|"yandex_market"|"oldi"|"runet"
+  "source":          "wildberries",     // "wildberries"|"ozon"|"yandex_market"|"runet"
   "characteristics": {                  // object<string,string> | {}
     "Бренд": "HP",
     "Тип печати": "лазерный"
@@ -116,12 +116,6 @@ http://localhost:8009
 
 ---
 
-### GET `/api/search/oldi`
-
-Те же параметры и тот же формат ответа.
-
----
-
 ### GET `/api/search/runet`
 
 **Query params:**
@@ -170,12 +164,11 @@ http://localhost:8009
 2. Пользователь отправляет форму
    → GET /api/correct?q=прнтр   (показать баннер «прнтр → принтер»)
 
-3. Параллельно запускаем 5 запросов с задержками:
+3. Параллельно запускаем 4 запроса с задержками:
    +0.8s  GET /api/search/wildberries?q=...&region=...
    +2.2s  GET /api/search/ozon?q=...&region=...
    +3.8s  GET /api/search/yandex_market?q=...&region=...
-   +5.0s  GET /api/search/oldi?q=...&region=...
-   +6.5s  GET /api/search/runet?q=...&region=...
+   +5.0s  GET /api/search/runet?q=...&region=...
 
 4. Каждый ответ → добавить карточки в UI (progressive loading)
 
@@ -199,7 +192,7 @@ Frontend (5173)
     ↓ /api/*
 Python FastAPI (8009)          ← единая точка входа
     ↓ httpx
-Node.js parser server (8008)   ← WB / Ozon / YM / OLDI
+Node.js parser server (8008)   ← WB / Ozon / YM
     ↓ REST
 Stealth proxy (9377)           ← playwright-extra (или camofox Docker)
     ↓ browser automation

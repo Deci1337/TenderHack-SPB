@@ -10,7 +10,7 @@ import {
   scrapeOzon,
   scrapeYandexMarket,
 } from './src/lib/playwright-scraper.js'
-import { fetchOldiOffers } from './src/lib/oldi.js'
+import { selectMedianProducts } from './src/lib/median.js'
 
 const PORT = process.env.PARSER_PORT ?? 8008
 
@@ -30,24 +30,6 @@ function resolveCity(region) {
   return MAP[region] ?? region ?? 'Москва'
 }
 
-const TITLE_SUFFIXES = [
-  /\s*—\s*купить по лучшей цене.*/i,
-  /\s*—\s*купить в интернет.*/i,
-  /\s*—\s*цена,.*/i,
-  /\s*\|\s*цены,.*/i,
-  /\s*\|\s*купить.*/i,
-  /\s*\/\s*[А-Я][а-я]+ [А-Я][а-я]+\s*$/,
-]
-function cleanTitle(name) {
-  if (!name) return ''
-  let s = name.trim()
-  // Strip "Category/ Product name" prefix (OLDI DataLayer format)
-  const slashIdx = s.indexOf('/ ')
-  if (slashIdx > 0 && slashIdx < 50) s = s.slice(slashIdx + 2).trim()
-  for (const re of TITLE_SUFFIXES) s = s.replace(re, '')
-  return s.trim()
-}
-
 function offerToProduct(offer, source, idx) {
   const features = offer.features ?? []
   const chars = {}
@@ -60,7 +42,7 @@ function offerToProduct(offer, source, idx) {
   }
   return {
     id: `${source}_${idx}`,
-    name: cleanTitle(offer.title ?? ''),
+    name: (offer.title ?? '').trim(),
     price: offer.price ?? 0,
     image_url: offer.image_url ?? '',
     source_url: offer.product_url ?? '',
@@ -72,16 +54,10 @@ function offerToProduct(offer, source, idx) {
   }
 }
 
-async function scrapeOldi({ normalizedQuery, limit, timeoutMs }) {
-  const res = await fetchOldiOffers({ normalizedQuery, limit, timeoutMs })
-  return res
-}
-
 const SCRAPERS = {
   wildberries: scrapeWildberries,
   ozon: scrapeOzon,
   yandex_market: scrapeYandexMarket,
-  oldi: scrapeOldi,
 }
 
 const server = http.createServer(async (req, res) => {
@@ -105,7 +81,7 @@ const server = http.createServer(async (req, res) => {
   const source = url.searchParams.get('source') ?? ''
   const q = url.searchParams.get('q') ?? ''
   const region = url.searchParams.get('region') ?? 'Москва'
-  const limit = Math.min(Number(url.searchParams.get('limit') ?? '5'), 20)
+  const limit = Math.min(Number(url.searchParams.get('limit') ?? '8'), 10)
 
   if (!SCRAPERS[source]) {
     res.writeHead(400)
@@ -125,16 +101,29 @@ const server = http.createServer(async (req, res) => {
 
     const result = await SCRAPERS[source]({
       normalizedQuery: normalizedQ,
-      limit,
+      limit: 30,
       city,
       timeoutMs: 45000,
       enrichSpecs: false,
     })
 
-    const products = (result.offers ?? [])
-      .slice(0, limit)
-      .map((offer, i) => offerToProduct(offer, source, i))
-      .filter(p => p.price > 0)
+    // Фильтр мусора:
+    //  • price > 0  — должна быть цена
+    //  • image_url есть — без фото карточка непригодна для сравнения
+    //  • все токены запроса встретились в названии (по 20 баллов за токен)
+    //    — это автоматически отсекает товары не по теме, включая «12 ₽ за шину»,
+    //    т.к. парсинг чужого поля редко даёт совпадение со всеми токенами запроса
+    const minScore = normalizedQ.tokens.length * 20
+    const relevant = (result.offers ?? [])
+      .filter(o => (o.price ?? 0) > 0)
+      .filter(o => (o.image_url ?? '').trim() !== '')
+      .filter(o => (o.relevance_score ?? 0) >= minScore)
+      .sort((a, b) => (b.relevance_score ?? 0) - (a.relevance_score ?? 0))
+      .slice(0, 25)
+
+    // Из релевантных по запросу — выбираем медианные по цене (методика НМЦК).
+    const median = selectMedianProducts(relevant, limit)
+    const products = median.map((offer, i) => offerToProduct(offer, source, i))
 
     res.writeHead(200)
     res.end(JSON.stringify({

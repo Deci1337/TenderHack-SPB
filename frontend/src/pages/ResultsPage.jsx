@@ -5,25 +5,24 @@ import ProductCard from '../components/ProductCard'
 import ProductModal from '../components/ProductModal'
 import SkeletonCard from '../components/SkeletonCard'
 
-const SOURCE_ORDER = ['wildberries', 'ozon', 'yandex_market', 'oldi', 'runet']
+const SOURCE_ORDER = ['wildberries', 'ozon', 'yandex_market', 'runet']
 const SOURCE_META = {
   wildberries:   { title: 'Wildberries',   color: '#6D28D9', dot: '#7C3AED', light: '#F5F3FF' },
   ozon:          { title: 'Ozon',          color: '#1D4ED8', dot: '#2563EB', light: '#EFF6FF' },
   yandex_market: { title: 'Яндекс Маркет', color: '#92400E', dot: '#D97706', light: '#FFFBEB' },
-  oldi:          { title: 'OLDI',          color: '#B91C1C', dot: '#DC2626', light: '#FEF2F2' },
   runet:         { title: 'Рунет',         color: '#065F46', dot: '#059669', light: '#ECFDF5' },
 }
-const SOURCE_DELAYS = { wildberries: 800, ozon: 2200, yandex_market: 3800, oldi: 5000, runet: 6500 }
+const SOURCE_DELAYS = { wildberries: 800, ozon: 2200, yandex_market: 3800, runet: 5000 }
 
-const CARD_WIDTH = 150  // px ширина карточки
-const CARD_GAP   = 12   // px зазор
+const CARD_WIDTH = 240   // px — крупная карточка
+const CARD_GAP   = 16    // px — зазор между карточками
 
 function Carousel({ products, onDetails }) {
   const trackRef = useRef(null)
   const [canLeft,  setCanLeft]  = useState(false)
   const [canRight, setCanRight] = useState(true)
 
-  const step = (CARD_WIDTH + CARD_GAP) * 3
+  const step = (CARD_WIDTH + CARD_GAP) * 2
 
   const scroll = (dir) => {
     const el = trackRef.current
@@ -51,10 +50,10 @@ function Carousel({ products, onDetails }) {
     top: '50%', transform: 'translateY(-50%)',
     [dir === -1 ? 'left' : 'right']: '-18px',
     zIndex: 10,
-    width: '36px', height: '36px', borderRadius: '50%',
+    width: '40px', height: '40px', borderRadius: '50%',
     background: enabled ? '#FFFFFF' : 'rgba(255,255,255,0.4)',
     border: '1.5px solid #E2E8F0',
-    boxShadow: enabled ? '0 4px 12px rgba(0,0,0,0.12)' : 'none',
+    boxShadow: enabled ? '0 4px 14px rgba(0,0,0,0.12)' : 'none',
     display: 'flex', alignItems: 'center', justifyContent: 'center',
     cursor: enabled ? 'pointer' : 'default',
     transition: 'all 0.15s',
@@ -64,18 +63,14 @@ function Carousel({ products, onDetails }) {
 
   return (
     <div style={{ position: 'relative', padding: '4px 24px' }}>
-      {/* Кнопка влево */}
       <button
         style={btn(-1, canLeft)}
         onClick={() => canLeft && scroll(-1)}
         aria-label="Листать назад"
-        onMouseEnter={e => { if (canLeft) e.currentTarget.style.boxShadow = '0 6px 20px rgba(0,0,0,0.18)' }}
-        onMouseLeave={e => { if (canLeft) e.currentTarget.style.boxShadow = '0 4px 12px rgba(0,0,0,0.12)' }}
       >
-        <ChevronLeft size={18} strokeWidth={2.5} />
+        <ChevronLeft size={20} strokeWidth={2.5} />
       </button>
 
-      {/* Полоска карточек */}
       <div
         ref={trackRef}
         style={{
@@ -86,26 +81,20 @@ function Carousel({ products, onDetails }) {
           WebkitOverflowScrolling: 'touch',
         }}
       >
-        <style>{`.carousel-track::-webkit-scrollbar { display: none }`}</style>
+        <style>{`div::-webkit-scrollbar { display: none }`}</style>
         {products.map((product, i) => (
           <div key={product.id} style={{ minWidth: `${CARD_WIDTH}px`, flexShrink: 0 }}>
-            <ProductCard
-              product={product}
-              onDetails={() => onDetails(i)}
-            />
+            <ProductCard product={product} onDetails={() => onDetails(i)} />
           </div>
         ))}
       </div>
 
-      {/* Кнопка вправо */}
       <button
         style={btn(1, canRight)}
         onClick={() => canRight && scroll(1)}
         aria-label="Листать вперёд"
-        onMouseEnter={e => { if (canRight) e.currentTarget.style.boxShadow = '0 6px 20px rgba(0,0,0,0.18)' }}
-        onMouseLeave={e => { if (canRight) e.currentTarget.style.boxShadow = '0 4px 12px rgba(0,0,0,0.12)' }}
       >
-        <ChevronRight size={18} strokeWidth={2.5} />
+        <ChevronRight size={20} strokeWidth={2.5} />
       </button>
     </div>
   )
@@ -169,7 +158,6 @@ export default function ResultsPage() {
     fetchSource('wildberries',   '/api/search/wildberries',   SOURCE_DELAYS.wildberries)
     fetchSource('ozon',          '/api/search/ozon',          SOURCE_DELAYS.ozon)
     fetchSource('yandex_market', '/api/search/yandex_market', SOURCE_DELAYS.yandex_market)
-    fetchSource('oldi',          '/api/search/oldi',          SOURCE_DELAYS.oldi)
     fetchSource('runet',         '/api/search/runet',         SOURCE_DELAYS.runet)
 
     // таймауты-гарантии: если API висит — всё равно показываем секцию
@@ -309,12 +297,9 @@ export default function ResultsPage() {
           const m        = SOURCE_META[src]
           const loaded   = loadedSources.includes(src)
           const products = allProducts.filter(p => p.source === src)
-          // Индекс для модалки — смещение внутри allProducts
-          const offset   = allProducts.findIndex(p => p.source === src)
 
           return (
             <section key={src} style={{ marginBottom: '44px' }}>
-              {/* Заголовок секции */}
               <div style={{ display: 'flex', alignItems: 'center', gap: '12px', marginBottom: '18px', paddingLeft: '24px' }}>
                 <div style={{
                   width: '10px', height: '10px', borderRadius: '50%',
@@ -335,29 +320,31 @@ export default function ResultsPage() {
                     background: m.light, color: m.color,
                     fontSize: '12px', fontWeight: 700,
                   }}>
-                    {products.length} товаров
+                    {products.length} {products.length === 1 ? 'товар' : products.length < 5 ? 'товара' : 'товаров'}
                   </span>
                 )}
+                {loaded && products.length === 0 && (
+                  <span style={{ fontSize: '12px', color: '#94A3B8' }}>совпадений не найдено</span>
+                )}
                 {!loaded && (
-                  <span style={{ fontSize: '12px', color: '#94A3B8', fontStyle: 'italic' }}>загружается...</span>
+                  <span style={{ fontSize: '12px', color: '#94A3B8', fontStyle: 'italic' }}>загружается…</span>
                 )}
               </div>
 
-              {/* Карусель или скелетон */}
               {!loaded ? (
-                <div style={{ display: 'flex', gap: '16px', padding: '4px 24px', overflow: 'hidden' }}>
-                  {[...Array(5)].map((_, i) => (
+                <div style={{ display: 'flex', gap: `${CARD_GAP}px`, padding: '4px 24px', overflow: 'hidden' }}>
+                  {[...Array(4)].map((_, i) => (
                     <div key={i} style={{ minWidth: `${CARD_WIDTH}px`, flexShrink: 0 }}>
                       <SkeletonCard />
                     </div>
                   ))}
                 </div>
-              ) : (
+              ) : products.length > 0 ? (
                 <Carousel
                   products={products}
                   onDetails={(i) => setModalIndex(allProducts.findIndex(p => p.id === products[i].id))}
                 />
-              )}
+              ) : null}
             </section>
           )
         })}

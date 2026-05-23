@@ -21,9 +21,13 @@ if USE_LLM:
 
 app = FastAPI(title="PriceHunter API")
 
+# В проде frontend проксирует /api/* в backend через nginx (same-origin) — CORS не
+# нужен. Для dev-режима с Vite на :5173 разрешаем явный список, плюс можно расширить
+# через ENV CORS_ORIGINS (через запятую).
+_extra_origins = [o.strip() for o in os.getenv("CORS_ORIGINS", "").split(",") if o.strip()]
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:5173", "http://localhost:3000"],
+    allow_origins=["http://localhost:5173", "http://localhost:3000", *_extra_origins],
     allow_methods=["*"],
     allow_headers=["*"],
 )
@@ -73,6 +77,21 @@ async def search_runet_endpoint(q: str = "", region: str = "Москва"):
             seen = {p.source_url for p in products}
             products += [p for p in extra if p.source_url not in seen]
 
+    # Фильтр мусора: фото обязательно, цена > 0, совпадение хотя бы одного
+    # значимого токена запроса в названии — это отсекает посторонние карточки
+    # вроде «12 ₽» (где число — не цена, а посторонняя цифра из чужого поля).
+    q_tokens = [t for t in corrected.lower().split() if len(t) > 2]
+    def matches_query(name: str) -> bool:
+        n = name.lower()
+        return any(t in n for t in q_tokens) if q_tokens else True
+
+    filtered = [
+        p for p in products
+        if p.image_url and p.price > 0 and matches_query(p.name)
+    ]
+    filtered.sort(key=lambda p: p.confidence, reverse=True)
+    top = filtered[:10]
+
     return {
         "corrected_query": corrected,
         "variants": variants,
@@ -88,12 +107,12 @@ async def search_runet_endpoint(q: str = "", region: str = "Москва"):
                 "confidence": p.confidence,
                 "extraction_method": p.extraction_method,
             }
-            for i, p in enumerate(products)
+            for i, p in enumerate(top)
         ],
     }
 
 
-async def _call_parser(source: str, q: str, region: str, limit: int = 5) -> dict:
+async def _call_parser(source: str, q: str, region: str, limit: int = 8) -> dict:
     """Вызывает Node.js parser server. Возвращает {products, liveHit}."""
     try:
         async with httpx.AsyncClient(timeout=50.0) as client:
@@ -125,7 +144,8 @@ async def _search_with_fallback(source: str, q: str, region: str, py_fn):
         return data
     # Node.js server unavailable or returned 0 results — use Python parser
     try:
-        products = await asyncio.get_event_loop().run_in_executor(None, py_fn, q, region, 8)
+        # Python-парсер сам тянет 25 кандидатов и возвращает медианные 8.
+        products = await py_fn(q, region, 8)
         return {
             "source": source,
             "products": [_mp_to_dict(p, source, i) for i, p in enumerate(products)],
@@ -158,14 +178,6 @@ async def search_ym(q: str = "", region: str = "Москва"):
         return {"products": [], "liveHit": False}
     corrected = correct(q)
     return await _search_with_fallback("yandex_market", corrected, region, _py_ym)
-
-
-@app.get("/api/search/oldi")
-async def search_oldi(q: str = "", region: str = "Москва"):
-    if not q.strip():
-        return {"products": [], "liveHit": False}
-    corrected = correct(q)
-    return await _call_parser("oldi", corrected, region)
 
 
 @app.get("/health")

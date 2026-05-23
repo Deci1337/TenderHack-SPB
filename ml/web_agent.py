@@ -123,9 +123,11 @@ SEARCH_PAGE_PATTERNS = (
     r'/(search|poisk)\?',
 )
 
-MAX_DDG_URLS   = 20   # берём из DDG после ранжирования
-MAX_PRODUCTS   = 5    # возвращаем максимум 5
-PAGE_TIMEOUT   = 12_000  # ms
+MAX_DDG_URLS   = 8    # берём из DDG после ранжирования
+MAX_CANDIDATES = 5    # сколько валидных карточек собираем до медианного отбора
+MAX_PRODUCTS   = 5    # возвращаем после отбора по медиане (методика НМЦК)
+PAGE_TIMEOUT   = 6_000  # ms per URL navigation
+RUNET_TOTAL_TIMEOUT = 45  # секунд — жёсткий таймаут всего поиска
 SNIPPET_LEN    = 4_000   # символов для Qwen fallback
 
 
@@ -232,7 +234,7 @@ async def ddg_search(query: str) -> list[tuple[str, float]]:
         async with httpx.AsyncClient(
             headers=DDG_HEADERS, timeout=10.0, follow_redirects=True
         ) as client:
-            resp = await client.post(DDG_URL, data={"q": f"{query} купить цена", "kl": "ru-ru"})
+            resp = await client.post(DDG_URL, data={"q": query, "kl": "ru-ru"})
             resp.raise_for_status()
         html = resp.text
 
@@ -283,7 +285,8 @@ async def ddg_search(query: str) -> list[tuple[str, float]]:
         return top
 
     except Exception as e:
-        logger.warning("DDG search failed: %s", e)
+        import traceback
+        logger.warning("DDG search failed: %s | %s", type(e).__name__, traceback.format_exc()[-300:])
         return []
 
 
@@ -295,7 +298,7 @@ async def load_page(page, url: str) -> str | None:
     """Загружает страницу, возвращает HTML. None при ошибке."""
     try:
         await page.goto(url, timeout=PAGE_TIMEOUT, wait_until="domcontentloaded")
-        await asyncio.sleep(1.5)  # ждём JS
+        await asyncio.sleep(0.5)  # ждём JS
         return await page.content()
     except Exception as e:
         logger.debug("Не загрузилась %s: %s", url, e)
@@ -725,17 +728,13 @@ async def process_url(page, url: str, query: str, use_qwen: bool = False) -> Run
 # Главный метод
 # ---------------------------------------------------------------------------
 
-async def search_runet(query: str, region: str = "Москва") -> list[RunetProduct]:
-    """
-    Полный пайплайн: DDG → Playwright → извлечение → валидация.
-    Возвращает до MAX_PRODUCTS товаров с image_url, price, characteristics.
-    """
+async def _search_runet_impl(query: str, region: str = "Москва") -> list[RunetProduct]:
     ddg_query = f"{query} купить цена {region}" if region else f"{query} купить цена"
     scored_urls = await ddg_search(ddg_query)
     if not scored_urls:
         return []
 
-    products: list[RunetProduct] = []
+    candidates: list[RunetProduct] = []
 
     async with async_playwright() as pw:
         browser = await pw.chromium.launch(headless=True)
@@ -747,20 +746,55 @@ async def search_runet(query: str, region: str = "Москва") -> list[RunetPr
         page = await context.new_page()
 
         for url, score in scored_urls:
-            if len(products) >= MAX_PRODUCTS:
+            if len(candidates) >= MAX_CANDIDATES:
                 break
 
             logger.info("Парсим [score=%.2f]: %s", score, url)
             product = await process_url(page, url, query, use_qwen=False)
             if product and product.is_valid():
-                products.append(product)
+                candidates.append(product)
 
-            await asyncio.sleep(1.5)
+            await asyncio.sleep(0.3)
 
         await browser.close()
 
-    logger.info("Рунет итого: %d товаров для '%s'", len(products), query)
+    # Медианный отбор: из всех собранных карточек оставляем MAX_PRODUCTS
+    # вокруг медианной цены, выбросы (1₽, опт, премиум) отбрасываем.
+    if len(candidates) > MAX_PRODUCTS:
+        s = sorted(candidates, key=lambda p: p.price)
+        drop = len(s) // 10
+        core = s[drop: len(s) - drop] if drop > 0 else s
+        mid = len(core) // 2
+        half = MAX_PRODUCTS // 2
+        start = max(0, mid - half)
+        end = min(len(core), start + MAX_PRODUCTS)
+        start = max(0, end - MAX_PRODUCTS)
+        products = core[start:end]
+    else:
+        products = candidates
+
+    logger.info("Рунет итого: %d медианных товаров из %d кандидатов для '%s'",
+                len(products), len(candidates), query)
     return products
+
+
+async def search_runet(query: str, region: str = "Москва") -> list[RunetProduct]:
+    """
+    Полный пайплайн: DDG → Playwright → извлечение → валидация.
+    Возвращает до MAX_PRODUCTS товаров с image_url, price, characteristics.
+    Жёсткий таймаут RUNET_TOTAL_TIMEOUT секунд.
+    """
+    try:
+        return await asyncio.wait_for(
+            _search_runet_impl(query, region),
+            timeout=RUNET_TOTAL_TIMEOUT,
+        )
+    except asyncio.TimeoutError:
+        logger.warning("Рунет: превышен таймаут %ds для '%s'", RUNET_TOTAL_TIMEOUT, query)
+        return []
+    except Exception as e:
+        logger.warning("Рунет ошибка: %s", e)
+        return []
 
 
 # ---------------------------------------------------------------------------

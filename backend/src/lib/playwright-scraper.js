@@ -10,10 +10,11 @@ function parsePrice(raw) {
 }
 
 function normalizePrice(value) {
+  // WB API (v9/v18) всегда отдаёт цену в копейках в sizes[].price.product, salePriceU, priceU.
+  // Делим на 100 безусловно — иначе товары дешевле 100₽ показывались бы x100.
   const p = parsePrice(value);
   if (!Number.isFinite(p)) return NaN;
-  if (p >= 10000) return Math.round(p / 100);
-  return Math.round(p);
+  return Math.round(p / 100);
 }
 
 async function launchBrowser({ proxyUrl } = {}) {
@@ -168,7 +169,7 @@ async function wbThrottle() {
   _wbLastRequestAt = Date.now();
 }
 
-async function fetchWbApiWithRetry(query, { timeoutMs = 15000, maxRetries = 8 } = {}) {
+async function fetchWbApiWithRetry(query, { timeoutMs = 15000, maxRetries = 4 } = {}) {
   let lastStatus = 0;
   let lastUrl = '';
   for (let i = 0; i < maxRetries; i += 1) {
@@ -203,7 +204,7 @@ async function fetchWbApiWithRetry(query, { timeoutMs = 15000, maxRetries = 8 } 
       clearTimeout(timer);
     }
     // Exponential backoff with jitter: ~0.6–1.4× of base, capped, so retries aren't rhythmic.
-    const base = Math.min(1000 * 2 ** i, 10000);
+    const base = Math.min(800 * 2 ** i, 4000);
     await sleep(Math.round(base * (0.6 + Math.random() * 0.8)));
   }
   return { ok: false, status: lastStatus, json: null, url: lastUrl, attempt: maxRetries };
@@ -212,7 +213,7 @@ async function fetchWbApiWithRetry(query, { timeoutMs = 15000, maxRetries = 8 } 
 async function scrapeWildberriesApi({ normalizedQuery, limit = 20, timeoutMs = 15000 } = {}) {
   const attempts = [];
 
-  const res = await fetchWbApiWithRetry(normalizedQuery.normalized, { timeoutMs });
+  const res = await fetchWbApiWithRetry(normalizedQuery.original, { timeoutMs });
   attempts.push({
     step: 'search_api_fetch',
     endpoint: res.url.slice(0, 100),
@@ -351,7 +352,7 @@ async function scrapeOzonPlaywright({ normalizedQuery, limit = 20, timeoutMs = 6
       }
     });
 
-    const searchUrl = `https://www.ozon.ru/search/?text=${encodeURIComponent(normalizedQuery.normalized)}&from_global=true`;
+    const searchUrl = `https://www.ozon.ru/search/?text=${encodeURIComponent(normalizedQuery.original)}&from_global=true`;
     attempts.push({ step: 'search_page', endpoint: searchUrl, blocked: false, ok: true });
     await page.goto(searchUrl, { waitUntil: 'domcontentloaded', timeout: timeoutMs });
     await page.waitForTimeout(8000);
@@ -488,7 +489,7 @@ const YM_RS_TOKEN = 'eJwzEv_EKMLBKLDwEKsEg8azbh6NVUdYNT6fYQUAWiMIFg,,';
 
 async function scrapeYandexMarketFetch({ normalizedQuery, limit = 20, timeoutMs = 15000 } = {}) {
   const attempts = [];
-  const url = `https://market.yandex.ru/search?text=${encodeURIComponent(normalizedQuery.normalized)}&rs=${encodeURIComponent(YM_RS_TOKEN)}`;
+  const url = `https://market.yandex.ru/search?text=${encodeURIComponent(normalizedQuery.original)}&rs=${encodeURIComponent(YM_RS_TOKEN)}`;
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), timeoutMs);
   const ymCookie = process.env.YM_COOKIE ?? '';
@@ -570,7 +571,7 @@ async function scrapeYandexMarketPlaywright({ normalizedQuery, limit = 20, timeo
       }
     });
 
-    const searchUrl = `https://market.yandex.ru/search?text=${encodeURIComponent(normalizedQuery.normalized)}`;
+    const searchUrl = `https://market.yandex.ru/search?text=${encodeURIComponent(normalizedQuery.original)}`;
     attempts.push({ step: 'search_page', endpoint: searchUrl, blocked: false, ok: true });
     await page.goto(searchUrl, { waitUntil: 'domcontentloaded', timeout: timeoutMs });
     await page.waitForTimeout(8000);

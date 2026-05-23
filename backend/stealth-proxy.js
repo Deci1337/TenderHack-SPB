@@ -115,6 +115,14 @@ const server = http.createServer(async (req, res) => {
       return send(res, 200, { ok: true, result })
     }
 
+    // POST /tabs/:id/scroll
+    if (req.method === 'POST' && parts[0] === 'tabs' && parts[2] === 'scroll') {
+      const body = await parseBody(req)
+      const tab = tabs.get(parts[1])
+      if (tab) await tab.page.evaluate((amount) => window.scrollBy(0, amount), body.amount ?? 800)
+      return send(res, 200, { ok: true })
+    }
+
     // DELETE /tabs/:id
     if (req.method === 'DELETE' && parts[0] === 'tabs' && parts[1]) {
       await closeTab(parts[1])
