@@ -1,6 +1,5 @@
 import { normalizeQuery } from './lib/query.js';
-import { dedupeOffers, groupBySource } from './lib/dedupe.js';
-import { buildPriceSummary } from './lib/summary.js';
+import { buildPriceSummary, groupBySource } from './lib/summary.js';
 import { createResilientExecutor } from './lib/resilience.js';
 import { buildAdapters } from './catalog.js';
 
@@ -69,8 +68,7 @@ export function createSearchService({
       }
     }
 
-    const deduped = dedupeOffers(offers);
-    const limitedOffers = options.limit ? deduped.slice(0, options.limit) : deduped;
+    const limitedOffers = options.limit ? offers.slice(0, options.limit) : offers;
     const grouped = groupBySource(limitedOffers);
     const parsedGrouped = groupBySource(offers);
     const source_counts = Object.fromEntries(

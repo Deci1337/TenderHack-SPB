@@ -141,7 +141,7 @@ src/
 ├── cli.js               # CLI-точка входа
 ├── pipeline.js          # Оркестрация: источники → дедупликация → сводка
 ├── catalog.js           # Адаптеры источников
-├── dedupe.js            # Дедупликация офферов
+├── summary.js           # Сводка цен, группировка по источнику
 ├── summary.js           # Ценовая сводка
 └── lib/
     ├── stealth-browser.js    # REST-клиент camofox-browser

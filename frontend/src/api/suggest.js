@@ -2,7 +2,7 @@ import { getSuggestions } from '../data/suggestions'
 
 let backendAvailable = null // null = не проверяли, true/false = результат проверки
 
-export async function fetchSuggestions(query, limit = 7) {
+export async function fetchSuggestions(query, limit = 5) {
   if (!query || query.length < 2) return []
 
   // Если бэкенд уже проверен и недоступен — сразу локально
@@ -12,7 +12,7 @@ export async function fetchSuggestions(query, limit = 7) {
 
   try {
     const res = await fetch(`/api/suggest?q=${encodeURIComponent(query)}&limit=${limit}`, {
-      signal: AbortSignal.timeout(800), // не ждём больше 800ms
+      signal: AbortSignal.timeout(15000), // LLM (Qwen) может отвечать несколько секунд
     })
     if (!res.ok) throw new Error('not ok')
     const data = await res.json()

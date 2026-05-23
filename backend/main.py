@@ -17,7 +17,7 @@ PARSER_BASE = os.getenv("PARSER_SERVER_URL", "http://localhost:8008")
 # Чтобы включить — поставь USE_LLM=1 в окружении
 USE_LLM = os.getenv("USE_LLM") == "1"
 if USE_LLM:
-    from llm_service import expand_query
+    from llm_service import expand_query, suggest_completions_list
 
 app = FastAPI(title="PriceHunter API")
 
@@ -30,7 +30,20 @@ app.add_middleware(
 
 
 @app.get("/api/suggest")
-def suggest(q: str = "", limit: int = 7):
+async def suggest(q: str = "", limit: int = 3):
+    q = q.strip()
+    if len(q) < 2:
+        return []
+    if USE_LLM:
+        try:
+            loop = asyncio.get_running_loop()
+            llm_hints = await loop.run_in_executor(
+                None, suggest_completions_list, q, min(limit, 8),
+            )
+            if llm_hints:
+                return llm_hints
+        except Exception as e:
+            logger.warning("LLM suggest failed: %s", e)
     return get_suggestions(q, limit)
 
 
@@ -42,10 +55,14 @@ def correct_query(q: str = ""):
     return {"original": q, "corrected": corrected, "changed": corrected != q}
 
 
+def _empty_runet_response(corrected: str = ""):
+    return {"corrected_query": corrected, "variants": [corrected] if corrected else [], "products": []}
+
+
 @app.get("/api/search/runet")
 async def search_runet_endpoint(q: str = "", region: str = "Москва"):
     if not q.strip():
-        return []
+        return _empty_runet_response()
 
     # 1. Исправляем опечатки локально (symspellpy, без интернета)
     corrected = correct(q)
@@ -54,7 +71,8 @@ async def search_runet_endpoint(q: str = "", region: str = "Москва"):
     variants = [corrected]
     if USE_LLM:
         try:
-            ext = expand_query(corrected)
+            loop = asyncio.get_running_loop()
+            ext = await loop.run_in_executor(None, expand_query, corrected)
             if ext:
                 variants = ext
         except Exception:
@@ -70,8 +88,7 @@ async def search_runet_endpoint(q: str = "", region: str = "Москва"):
             if len(products) >= 5:
                 break
             extra = await search_runet(variant, region=region)
-            seen = {p.source_url for p in products}
-            products += [p for p in extra if p.source_url not in seen]
+            products += extra
 
     return {
         "corrected_query": corrected,
@@ -123,9 +140,9 @@ async def _search_with_fallback(source: str, q: str, region: str, py_fn):
     data = await _call_parser(source, q, region)
     if data.get("products"):
         return data
-    # Node.js server unavailable or returned 0 results — use Python parser
+    # Node.js server unavailable or returned 0 results — use Python parser (async)
     try:
-        products = await asyncio.get_event_loop().run_in_executor(None, py_fn, q, region, 8)
+        products = await py_fn(q, region, 8)
         return {
             "source": source,
             "products": [_mp_to_dict(p, source, i) for i, p in enumerate(products)],

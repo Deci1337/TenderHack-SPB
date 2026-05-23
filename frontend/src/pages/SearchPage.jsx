@@ -35,10 +35,15 @@ export default function SearchPage() {
 
   useEffect(() => {
     let cancelled = false
-    fetchSuggestions(query, 7).then(results => {
-      if (!cancelled) setHints(results)
-    })
-    return () => { cancelled = true }
+    const timer = setTimeout(() => {
+      fetchSuggestions(query, 5).then(results => {
+        if (!cancelled) setHints(results)
+      })
+    }, 400) // debounce — не дергаем Qwen на каждый символ
+    return () => {
+      cancelled = true
+      clearTimeout(timer)
+    }
   }, [query])
 
   const go = (q = query) => {

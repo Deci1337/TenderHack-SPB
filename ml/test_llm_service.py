@@ -10,12 +10,15 @@ import numpy as np
 import pytest
 
 from llm_service import (
+    _completions_to_groups,
     _parse_response,
+    _parse_suggest_response,
     calculate_nmck,
-    deduplicate,
+    clean_query,
     expand_query,
     filter_outliers,
     is_product_query,
+    suggest_completions,
 )
 
 
@@ -47,12 +50,15 @@ class TestIsProductQuery:
         assert is_product_query("  123  ") is False
 
     def test_stop_word_prefixes(self):
-        assert is_product_query("где купить принтер") is False
-        assert is_product_query("как выбрать монитор") is False
-        assert is_product_query("погода в москве") is False
-        assert is_product_query("сколько стоит ноутбук") is False
-        assert is_product_query("доставка принтера") is False
-        assert is_product_query("скидка на бумагу") is False
+        # после clean_query остаётся товарная часть — запрос валиден
+        assert is_product_query("где купить принтер") is True
+        assert is_product_query("как выбрать монитор") is True
+        assert is_product_query("сколько стоит ноутбук") is True
+        assert is_product_query("доставка принтера") is True
+        assert is_product_query("скидка на бумагу") is True
+        # только стоп-слова — после clean_query пусто
+        assert is_product_query("где купить") is False
+        assert clean_query("где купить") == ""
 
     def test_borderline_valid(self):
         # слово из 3 символов — минимально допустимое
@@ -105,6 +111,46 @@ class TestParseResponse:
         raw = '{"corrected": "шина летняя", "variants": ["летние шины", "автошина летняя", "покрышка лето"]}'
         result = _parse_response(raw, "шина лет")
         assert result[0] == "шина летняя"
+
+
+# ---------------------------------------------------------------------------
+# suggest_completions
+# ---------------------------------------------------------------------------
+
+class TestSuggestCompletions:
+    def setup_method(self):
+        suggest_completions.cache_clear()
+
+    def test_parse_suggest_response(self):
+        raw = '{"completions": ['
+        raw += '{"text": "принтер лазерный Pantum P2500W A4", "category": "Оргтехника", "score": 0.95},'
+        raw += '{"text": "принтер лазерный HP LaserJet", "category": "Оргтехника", "score": 0.8}'
+        raw += ']}'
+        items = _parse_suggest_response(raw, "принтер лаз", 5)
+        assert len(items) == 2
+        assert items[0]["text"].startswith("принтер")
+        assert items[0]["score"] >= items[1]["score"]
+
+    def test_completions_to_groups(self):
+        groups = _completions_to_groups([
+            {"text": "шина летняя 205/55 R16", "category": "Шины", "score": 0.9},
+            {"text": "шина зимняя 205/55 R16", "category": "Шины", "score": 0.8},
+        ])
+        assert len(groups) == 1
+        assert groups[0]["category"] == "Шины"
+        assert len(groups[0]["items"]) == 2
+
+    def test_llm_suggest_mocked(self):
+        mock_json = (
+            '{"completions": ['
+            '{"text": "принтер лазерный А4 Pantum P2500W", "category": "Оргтехника", "score": 0.92},'
+            '{"text": "принтер лазерный HP LaserJet Pro", "category": "Оргтехника", "score": 0.88}'
+            ']}'
+        )
+        with patch("llm_service._run_chat_completion", return_value=mock_json):
+            result = list(suggest_completions("принтер лаз", 5))
+            assert len(result) >= 1
+            assert any("принтер" in item for g in result for item in g["items"])
 
 
 # ---------------------------------------------------------------------------
@@ -182,6 +228,26 @@ class TestExpandQuery:
             expand_query("принтер")
             expand_query("принтер")  # второй вызов из кэша
             assert mock_load.call_count <= 1
+
+    def test_clean_query_before_llm(self):
+        expand_query.cache_clear()
+        with patch("llm_service._load_model") as mock_load, \
+             patch("llm_service._parse_response", return_value=["принтер лазерный"]) as mock_parse:
+            tokenizer = MagicMock(
+                apply_chat_template=MagicMock(return_value="<p>"),
+                eos_token_id=0,
+                decode=MagicMock(return_value=MOCK_RESPONSE),
+            )
+            tokenizer.return_value = {"input_ids": MagicMock(shape=(1, 10))}
+            mock_load.return_value = (MagicMock(device="cpu", generate=MagicMock(return_value=[MagicMock()])), tokenizer)
+
+            expand_query("где купить принтер лазерный")
+
+            mock_parse.assert_called_once()
+            assert mock_parse.call_args[0][1] == clean_query("где купить принтер лазерный")
+            prompt_text = tokenizer.apply_chat_template.call_args[0][0][0]["content"]
+            assert "где купить" not in prompt_text
+            assert "принтер лазерный" in prompt_text
 
 
 # ---------------------------------------------------------------------------
@@ -274,63 +340,3 @@ class TestCalculateNmck:
         # Главное: nmck не должна быть рассчитана при таком разбросе
         if r["status"] != "success":
             assert r["nmck"] is None
-
-
-# ---------------------------------------------------------------------------
-# deduplicate
-# ---------------------------------------------------------------------------
-
-class TestDeduplicate:
-    def test_exact_duplicate(self):
-        products = [
-            {"title": "Принтер HP LaserJet 1020", "price": 12000, "source": "ozon"},
-            {"title": "Принтер HP LaserJet 1020", "price": 12500, "source": "wb"},
-        ]
-        result = deduplicate(products)
-        assert len(result) == 1
-        assert result[0]["price"] == 12250.0  # медиана
-
-    def test_case_insensitive(self):
-        products = [
-            {"title": "принтер hp laserjet", "price": 10000, "source": "ozon"},
-            {"title": "ПРИНТЕР HP LASERJET", "price": 11000, "source": "wb"},
-        ]
-        result = deduplicate(products)
-        assert len(result) == 1
-
-    def test_different_products_not_merged(self):
-        products = [
-            {"title": "Принтер лазерный", "price": 12000, "source": "ozon"},
-            {"title": "Мышь беспроводная", "price": 2000, "source": "wb"},
-        ]
-        result = deduplicate(products)
-        assert len(result) == 2
-
-    def test_sources_collected(self):
-        products = [
-            {"title": "Принтер HP", "price": 10000, "source": "ozon"},
-            {"title": "Принтер HP", "price": 11000, "source": "wb"},
-        ]
-        result = deduplicate(products)
-        assert set(result[0]["source_names"]) == {"ozon", "wb"}
-        assert result[0]["sources_count"] == 2
-
-    def test_empty_list(self):
-        assert deduplicate([]) == []
-
-    def test_punctuation_ignored(self):
-        products = [
-            {"title": "Принтер HP, лазерный.", "price": 10000, "source": "ozon"},
-            {"title": "Принтер HP лазерный",   "price": 11000, "source": "wb"},
-        ]
-        result = deduplicate(products)
-        assert len(result) == 1
-
-    def test_name_field_fallback(self):
-        # Некоторые парсеры могут отдавать "name" вместо "title"
-        products = [
-            {"name": "Шина летняя R16", "price": 5000, "source": "wb"},
-            {"name": "Шина летняя R16", "price": 5500, "source": "ozon"},
-        ]
-        result = deduplicate(products)
-        assert len(result) == 1
