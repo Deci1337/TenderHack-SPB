@@ -124,7 +124,7 @@ SEARCH_PAGE_PATTERNS = (
 )
 
 MAX_DDG_URLS   = 20   # берём из DDG после ранжирования
-MAX_PRODUCTS   = 5    # возвращаем максимум 5
+MAX_PRODUCTS   = 10   # возвращаем максимум 10
 PAGE_TIMEOUT   = 12_000  # ms
 SNIPPET_LEN    = 4_000   # символов для Qwen fallback
 
@@ -725,11 +725,12 @@ async def process_url(page, url: str, query: str, use_qwen: bool = False) -> Run
 # Главный метод
 # ---------------------------------------------------------------------------
 
-async def search_runet(query: str, region: str = "Москва") -> list[RunetProduct]:
+async def search_runet(query: str, region: str = "Москва", limit: int = MAX_PRODUCTS) -> list[RunetProduct]:
     """
     Полный пайплайн: DDG → Playwright → извлечение → валидация.
     Возвращает до MAX_PRODUCTS товаров с image_url, price, characteristics.
     """
+    max_products = max(1, min(int(limit or MAX_PRODUCTS), MAX_PRODUCTS))
     ddg_query = f"{query} {region}" if region else query
     scored_urls = await ddg_search(ddg_query)
     if not scored_urls:
@@ -747,7 +748,7 @@ async def search_runet(query: str, region: str = "Москва") -> list[RunetPr
         page = await context.new_page()
 
         for url, score in scored_urls:
-            if len(products) >= MAX_PRODUCTS:
+            if len(products) >= max_products:
                 break
 
             logger.info("Парсим [score=%.2f]: %s", score, url)

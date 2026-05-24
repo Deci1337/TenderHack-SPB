@@ -11,6 +11,9 @@ from spell_checker import correct
 logger = logging.getLogger(__name__)
 
 PARSER_BASE = os.getenv("PARSER_SERVER_URL", "http://localhost:8008")
+PARSER_TIMEOUT_S = float(os.getenv("PARSER_TIMEOUT_S", "120"))
+PARSER_RETRIES = max(1, int(os.getenv("PARSER_RETRIES", "2")))
+MAX_CARDS_PER_SOURCE = 10
 
 # expand_query тянет Qwen модель (~8 ГБ). Включается после `python ml/download_model.py`
 # Чтобы включить — поставь USE_LLM=1 в окружении
@@ -42,9 +45,9 @@ def correct_query(q: str = ""):
 
 
 @app.get("/api/search/runet")
-async def search_runet_endpoint(q: str = "", region: str = "Москва"):
+async def search_runet_endpoint(q: str = "", region: str = "Москва", limit: int = MAX_CARDS_PER_SOURCE):
     if not q.strip():
-        return []
+        return {"corrected_query": q, "variants": [], "products": [], "error": "empty_query"}
 
     # 1. Исправляем опечатки локально (symspellpy, без интернета)
     corrected = correct(q)
@@ -61,16 +64,18 @@ async def search_runet_endpoint(q: str = "", region: str = "Москва"):
 
     # 3. Ищем по первому варианту
     primary = variants[0]
-    products = await search_runet(primary, region=region)
+    runet_limit = max(1, min(limit, MAX_CARDS_PER_SOURCE))
+    products = await search_runet(primary, region=region, limit=runet_limit)
 
     # 4. Если мало — добираем по синонимам
     if len(products) < 3 and len(variants) > 1:
         for variant in variants[1:]:
-            if len(products) >= 5:
+            if len(products) >= runet_limit:
                 break
-            extra = await search_runet(variant, region=region)
+            extra = await search_runet(variant, region=region, limit=runet_limit)
             seen = {p.source_url for p in products}
             products += [p for p in extra if p.source_url not in seen]
+            products = products[:runet_limit]
 
     return {
         "corrected_query": corrected,
@@ -89,45 +94,67 @@ async def search_runet_endpoint(q: str = "", region: str = "Москва"):
             }
             for i, p in enumerate(products)
         ],
+        "error": None if products else "no_runet_products_found",
     }
 
 
-async def _call_parser(source: str, q: str, region: str, limit: int = 5) -> dict:
+def _normalize_limit(limit: int) -> int:
+    return max(1, min(limit, MAX_CARDS_PER_SOURCE))
+
+
+async def _call_parser(source: str, q: str, region: str, limit: int = MAX_CARDS_PER_SOURCE) -> dict:
     """Вызывает Node.js parser server. Возвращает {products, liveHit}."""
-    try:
-        async with httpx.AsyncClient(timeout=50.0) as client:
-            r = await client.get(
-                f"{PARSER_BASE}/search",
-                params={"source": source, "q": q, "region": region, "limit": limit},
-            )
-            return r.json()
-    except Exception as e:
-        logger.warning("Parser server unavailable for %s: %s", source, e)
-        return {"source": source, "products": [], "liveHit": False}
+    last_error = None
+    for attempt in range(1, PARSER_RETRIES + 1):
+        try:
+            async with httpx.AsyncClient(timeout=PARSER_TIMEOUT_S) as client:
+                r = await client.get(
+                    f"{PARSER_BASE}/search",
+                    params={"source": source, "q": q, "region": region, "limit": _normalize_limit(limit)},
+                )
+                r.raise_for_status()
+                payload = r.json()
+                payload.setdefault("source", source)
+                payload.setdefault("products", [])
+                payload.setdefault("liveHit", False)
+                payload["parser_attempt"] = attempt
+                return payload
+        except Exception as e:
+            last_error = e
+            logger.warning("Parser call failed for %s (attempt %d/%d): %s", source, attempt, PARSER_RETRIES, e)
+            if attempt < PARSER_RETRIES:
+                await asyncio.sleep(0.8 * attempt)
+
+    return {
+        "source": source,
+        "products": [],
+        "liveHit": False,
+        "error": str(last_error) if last_error else "parser_call_failed",
+    }
 
 
 @app.get("/api/search/wildberries")
-async def search_wb(q: str = "", region: str = "Москва"):
+async def search_wb(q: str = "", region: str = "Москва", limit: int = MAX_CARDS_PER_SOURCE):
     if not q.strip():
         return {"products": [], "liveHit": False}
     corrected = correct(q)
-    return await _call_parser("wildberries", corrected, region)
+    return await _call_parser("wildberries", corrected, region, limit)
 
 
 @app.get("/api/search/ozon")
-async def search_ozon(q: str = "", region: str = "Москва"):
+async def search_ozon(q: str = "", region: str = "Москва", limit: int = MAX_CARDS_PER_SOURCE):
     if not q.strip():
         return {"products": [], "liveHit": False}
     corrected = correct(q)
-    return await _call_parser("ozon", corrected, region)
+    return await _call_parser("ozon", corrected, region, limit)
 
 
 @app.get("/api/search/yandex_market")
-async def search_ym(q: str = "", region: str = "Москва"):
+async def search_ym(q: str = "", region: str = "Москва", limit: int = MAX_CARDS_PER_SOURCE):
     if not q.strip():
         return {"products": [], "liveHit": False}
     corrected = correct(q)
-    return await _call_parser("yandex_market", corrected, region)
+    return await _call_parser("yandex_market", corrected, region, limit)
 
 
 @app.get("/health")
