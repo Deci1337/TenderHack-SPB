@@ -68,6 +68,27 @@ function tileToItem(tile) {
   };
 }
 
+function normalizeOzonDeliveryText(raw) {
+  const text = String(raw ?? '')
+    .replace(/\u00a0/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+  if (!text) return '';
+
+  const lowered = text.toLowerCase();
+  if (lowered.includes('послезавтра')) return 'Послезавтра';
+  if (lowered.includes('завтра')) return 'Завтра';
+  if (lowered.includes('сегодня')) return 'Сегодня';
+
+  const dateMatch = text.match(/([0-2]?\d|3[01])\s+(января|февраля|марта|апреля|мая|июня|июля|августа|сентября|октября|ноября|декабря)/i);
+  if (dateMatch) return `${dateMatch[1]} ${dateMatch[2]}`;
+
+  const daysMatch = text.match(/\d+\s*(?:дн\.?|дня|дней)/i);
+  if (daysMatch) return daysMatch[0];
+
+  return text.length > 120 ? `${text.slice(0, 117)}...` : text;
+}
+
 async function extractOzonItems(tabId, timeoutMs) {
   // Two scroll passes + short settle to load lazy cards below the fold.
   await sb.scroll(tabId, { amount: 1200, timeoutMs });
@@ -182,8 +203,10 @@ async function extractYmItems(tabId, timeoutMs) {
 
 // Lift delivery text off the parsed item onto the offer, deriving days/date/origin
 // when the text contains a parseable RU date. No deadline filtering — informational.
-function attachDelivery(offer, item) {
-  const text = item.delivery_text ?? '';
+function attachDelivery(offer, item, source) {
+  const text = source === 'ozon'
+    ? normalizeOzonDeliveryText(item.delivery_text ?? '')
+    : (item.delivery_text ?? '');
   if (text) offer.delivery_text = text;
   const info = parseDeliveryText(text);
   if (info) {
@@ -229,7 +252,7 @@ async function scrapeViaStealth({ source, searchUrl, extractItems, normalizedQue
       const key = item.title + ':' + item.price;
       if (seen.has(key)) continue;
       seen.add(key);
-      offers.push(attachDelivery(toOffer(source, item, normalizedQuery, retrievalMode), item));
+      offers.push(attachDelivery(toOffer(source, item, normalizedQuery, retrievalMode), item, source));
       if (offers.length >= limit) break;
     }
     const sorted = offers.sort((a, b) => b.relevance_score - a.relevance_score || a.price - b.price);
