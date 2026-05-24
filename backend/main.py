@@ -95,6 +95,7 @@ async def search_runet_endpoint(q: str = "", region: str = "Москва"):
     return {
         "corrected_query": corrected,
         "variants": variants,
+        "liveHit": bool(top),
         "products": [
             {
                 "id": f"runet_{i}",

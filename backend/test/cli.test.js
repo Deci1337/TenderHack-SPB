@@ -7,7 +7,7 @@ const execFileAsync = promisify(execFile);
 
 test('cli prints per-source counts in human output', async () => {
   const { stdout } = await execFileAsync('node', ['src/cli.js', 'айфон 15', '--limit', '1']);
-  assert.match(stdout, /Per source: wildberries=1, ozon=0, yandex_market=0, oldi=0/);
+  assert.match(stdout, /Per source: wildberries=1, ozon=0, yandex_market=0/);
   assert.match(stdout, /Offers: 1/);
 });
 

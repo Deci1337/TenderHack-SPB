@@ -763,7 +763,15 @@ async def _search_runet_impl(query: str, region: str = "Москва") -> list[R
                 break
 
             logger.info("Парсим [score=%.2f]: %s", score, url)
-            products = await process_url(page, url, query, use_qwen=False)
+            try:
+                products = await process_url(page, url, query, use_qwen=False)
+            except Exception as e:
+                logger.warning("Пропускаем %s: %s", url, e)
+                try:
+                    page = await context.new_page()
+                except Exception:
+                    pass
+                continue
             for p in products:
                 candidates.append(p)
                 if len(candidates) >= MAX_CANDIDATES:

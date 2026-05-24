@@ -166,8 +166,7 @@ async function main() {
     wildberries: 'Wildberries',
     ozon: 'Ozon',
     yandex_market: 'Яндекс Маркет',
-    oldi: 'OLDI',
-    universal: 'Рунет',
+universal: 'Рунет',
   };
 
   console.log(`Query: ${result.original_query}`);

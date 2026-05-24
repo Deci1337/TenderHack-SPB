@@ -11,11 +11,11 @@ test('buildUniversalSearchDocument keeps top 10 offers in a stable schema', () =
       median_price: 10000,
     },
     source_counts: {
-      oldi: 3,
+      wildberries: 3,
       ozon: 3,
     },
     offers: Array.from({ length: 11 }, (_, index) => ({
-      source: index % 2 === 0 ? 'oldi' : 'ozon',
+      source: index % 2 === 0 ? 'wildberries' : 'ozon',
       title: `Offer ${index + 1}`,
       price: 1000 + index,
       currency: 'RUB',
@@ -36,8 +36,8 @@ test('buildUniversalSearchDocument keeps top 10 offers in a stable schema', () =
   assert.equal(schema.top_sources.length, 10);
   assert.equal(schema.items.length, 10);
   assert.equal(schema.items[0].position_number, 1);
-  assert.equal(schema.items[0].sources[0].name, 'oldi');
+  assert.equal(schema.items[0].sources[0].name, 'wildberries');
   assert.equal(schema.items[0].attributes.some((item) => item.name === 'feature'), true);
-  assert.equal(schema.extra.source_counts.oldi, 3);
+  assert.equal(schema.extra.source_counts.wildberries, 3);
   assert.equal(schema.calculation.average_price, 10000);
 });

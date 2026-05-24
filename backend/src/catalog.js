@@ -1,7 +1,6 @@
 import { scoreOffer } from './lib/query.js';
 import { fetchAndParseOffers, fetchAndParseOzonOffers } from './lib/product-pages.js';
 import { fetchWildberriesOffers } from './lib/wildberries-api.js';
-import { fetchOldiOffers } from './lib/oldi.js';
 import { scrapeWildberriesStealth, scrapeOzonStealth, scrapeYandexMarketStealth } from './lib/stealth-scraper.js';
 import { resolveGeo } from './lib/geo.js';
 
@@ -286,47 +285,6 @@ function createWildberriesAdapter({
   };
 }
 
-function createOldiAdapter({
-  fetchImpl = globalThis.fetch,
-  timeoutMs = 15000,
-  limit = 10,
-} = {}) {
-  const fallbackAdapter = createFallbackAdapter('oldi', runetItems);
-
-  return {
-    name: 'oldi',
-    async search(normalizedQuery) {
-      const liveResult = await fetchOldiOffers({
-        normalizedQuery,
-        fetchImpl,
-        limit,
-        timeoutMs,
-      });
-
-      if (liveResult.liveHit && liveResult.offers.length > 0) {
-        return liveResult.offers;
-      }
-
-      const fallbackOffers = await fallbackAdapter.search(normalizedQuery);
-      if (fallbackOffers.length === 0) {
-        return [];
-      }
-
-      const fallbackReason = liveResult.attempts.length > 0
-        ? `oldi blocked or empty after ${liveResult.attempts.length} attempts`
-        : 'oldi not attempted';
-
-      return fallbackOffers.map((offer) => ({
-        ...offer,
-        raw_payload: {
-          ...offer.raw_payload,
-          fallback_reason: fallbackReason,
-          live_attempts: liveResult.attempts,
-        },
-      }));
-    },
-  };
-}
 
 function createYandexMarketAdapter({
   fetchImpl = globalThis.fetch,
@@ -398,8 +356,6 @@ export function buildAdapters({
   const wildberriesPolicy = sourcePolicies.wildberries ?? {};
   const ozonPolicy = sourcePolicies.ozon ?? {};
   const yandexMarketPolicy = sourcePolicies.yandex_market ?? {};
-  const oldiPolicy = sourcePolicies.oldi ?? {};
-
   // Регион можно задать именем (city) или сырыми кодами (geo). Явные коды имеют приоритет.
   const geo = resolveGeo({ city, ...(geoOverride ?? {}) });
 
@@ -425,11 +381,6 @@ export function buildAdapters({
       fetchImpl,
       timeoutMs: yandexMarketPolicy.timeoutMs,
       geo,
-    }),
-    createOldiAdapter({
-      fetchImpl,
-      timeoutMs: oldiPolicy.timeoutMs,
-      limit: oldiPolicy.limit,
     }),
   ];
 }
