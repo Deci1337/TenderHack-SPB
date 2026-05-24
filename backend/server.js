@@ -10,6 +10,7 @@ import {
   scrapeOzon,
   scrapeYandexMarket,
 } from './src/lib/playwright-scraper.js'
+import { selectMedianProducts } from './src/lib/median.js'
 
 const PORT = process.env.PARSER_PORT ?? 8008
 
@@ -41,7 +42,7 @@ function offerToProduct(offer, source, idx) {
   }
   return {
     id: `${source}_${idx}`,
-    name: offer.title ?? '',
+    name: (offer.title ?? '').trim().replace(/^[/\s]+/, ''),
     price: offer.price ?? 0,
     image_url: offer.image_url ?? '',
     source_url: offer.product_url ?? '',
@@ -80,7 +81,7 @@ const server = http.createServer(async (req, res) => {
   const source = url.searchParams.get('source') ?? ''
   const q = url.searchParams.get('q') ?? ''
   const region = url.searchParams.get('region') ?? 'Москва'
-  const limit = Math.min(Number(url.searchParams.get('limit') ?? '5'), 20)
+  const limit = Math.min(Number(url.searchParams.get('limit') ?? '10'), 10)
 
   if (!SCRAPERS[source]) {
     res.writeHead(400)
@@ -100,16 +101,22 @@ const server = http.createServer(async (req, res) => {
 
     const result = await SCRAPERS[source]({
       normalizedQuery: normalizedQ,
-      limit,
+      limit: 30,
       city,
       timeoutMs: 45000,
       enrichSpecs: false,
     })
 
-    const products = (result.offers ?? [])
-      .slice(0, limit)
-      .map((offer, i) => offerToProduct(offer, source, i))
-      .filter(p => p.price > 0)
+    // Фильтр мусора: только цена > 0. Поисковики WB/YM/Ozon уже ранжируют по релевантности,
+    // дополнительный порог relevance_score срезал морфологические формы (карандашей ≠ карандаш).
+    const relevant = (result.offers ?? [])
+      .filter(o => (o.price ?? 0) > 0)
+      .sort((a, b) => (b.relevance_score ?? 0) - (a.relevance_score ?? 0))
+      .slice(0, 30)
+
+    // Из релевантных по запросу — выбираем медианные по цене (методика НМЦК).
+    const median = selectMedianProducts(relevant, limit)
+    const products = median.map((offer, i) => offerToProduct(offer, source, i))
 
     res.writeHead(200)
     res.end(JSON.stringify({

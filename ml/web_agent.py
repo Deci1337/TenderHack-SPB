@@ -28,7 +28,7 @@
   Веса (w1..w6) подобраны эмпирически на тестовом наборе из 15 запросов
   по категориям Шины/Одежда/Оргтехника. См. SCORE_WEIGHTS ниже.
 
-  URL сортируются по убыванию score, берутся MAX_DDG_URLS=10 верхних.
+  URL сортируются по убыванию score, берутся MAX_DDG_URLS=20 верхних.
 
 ВОПРОС 3: Как извлекаем данные с НЕИЗВЕСТНОГО сайта?
 
@@ -124,8 +124,10 @@ SEARCH_PAGE_PATTERNS = (
 )
 
 MAX_DDG_URLS   = 20   # берём из DDG после ранжирования
-MAX_PRODUCTS   = 5    # возвращаем максимум 5
-PAGE_TIMEOUT   = 12_000  # ms
+MAX_CANDIDATES = 20   # сколько валидных карточек собираем до медианного отбора
+MAX_PRODUCTS   = 10   # возвращаем после отбора по медиане (методика НМЦК)
+PAGE_TIMEOUT   = 12_000  # ms per URL navigation
+RUNET_TOTAL_TIMEOUT = 120  # секунд — жёсткий таймаут всего поиска
 SNIPPET_LEN    = 4_000   # символов для Qwen fallback
 
 
@@ -232,7 +234,7 @@ async def ddg_search(query: str) -> list[tuple[str, float]]:
         async with httpx.AsyncClient(
             headers=DDG_HEADERS, timeout=10.0, follow_redirects=True
         ) as client:
-            resp = await client.post(DDG_URL, data={"q": f"{query} купить цена", "kl": "ru-ru"})
+            resp = await client.post(DDG_URL, data={"q": query, "kl": "ru-ru"})
             resp.raise_for_status()
         html = resp.text
 
@@ -283,7 +285,8 @@ async def ddg_search(query: str) -> list[tuple[str, float]]:
         return top
 
     except Exception as e:
-        logger.warning("DDG search failed: %s", e)
+        import traceback
+        logger.warning("DDG search failed: %s | %s", type(e).__name__, traceback.format_exc()[-300:])
         return []
 
 
@@ -295,7 +298,7 @@ async def load_page(page, url: str) -> str | None:
     """Загружает страницу, возвращает HTML. None при ошибке."""
     try:
         await page.goto(url, timeout=PAGE_TIMEOUT, wait_until="domcontentloaded")
-        await asyncio.sleep(1.5)  # ждём JS
+        await asyncio.sleep(0.5)  # ждём JS
         return await page.content()
     except Exception as e:
         logger.debug("Не загрузилась %s: %s", url, e)
@@ -347,7 +350,7 @@ def extract_jsonld(html: str) -> dict | None:
                 try:
                     return {
                         "name": name,
-                        "price": float(str(price).replace(" ", "").replace(",", ".")),
+                        "price": float(str(price).replace("\xa0", "").replace(" ", "").replace(" ", "").replace(",", ".")),
                         "image_url": str(image) if image else None,
                         "characteristics": chars,
                         "method": "jsonld",
@@ -389,7 +392,7 @@ def extract_opengraph(html: str) -> dict | None:
         return None
 
     try:
-        price = float(re.sub(r'[^\d.]', '', price_str.replace(",", ".")))
+        price = float(re.sub(r'[^\d.]', '', price_str.replace("\xa0", "").replace(" ", "").replace(",", ".")))
     except ValueError:
         return None
 
@@ -470,10 +473,10 @@ async def extract_from_dom(page, url: str) -> dict | None:
             return None
 
         # Чистим цену
-        nums = re.findall(r'\d[\d\s]*', price_text)
+        nums = re.findall(r'\d[\d\s\xa0]*', price_text)
         if not nums:
             return None
-        price = float(nums[0].replace(" ", ""))
+        price = float(re.sub(r'[^\d]', '', nums[0]))
         if price <= 0 or price > 10_000_000:
             return None
 
@@ -596,146 +599,155 @@ def qwen_extract(query: str, page_text: str, source_url: str) -> dict | None:
 # Сборка: обрабатываем одну страницу
 # ---------------------------------------------------------------------------
 
-async def _find_product_link(page, base_url: str) -> str | None:
+async def _find_product_links(page, base_url: str, max_links: int = 4) -> list[str]:
     """
-    Если попали на листинг/категорию — ищем ссылку на первую карточку товара.
-    Возвращает абсолютный URL карточки или None.
+    Если попали на листинг/категорию — ищем ссылки на карточки товаров.
+    Возвращает список абсолютных URL карточек (до max_links штук).
     """
     try:
-        href = await page.evaluate("""() => {
-            // Типичные контейнеры карточек товаров
+        hrefs = await page.evaluate("""(maxLinks) => {
             const cardSelectors = [
-                '[class*="product-card"] a',
-                '[class*="product_card"] a',
-                '[class*="ProductCard"] a',
-                '[class*="catalog-item"] a',
-                '[class*="item-card"] a',
-                '[class*="goods-item"] a',
-                '[class*="product-item"] a',
-                '[class*="product-tile"] a',
+                '[class*="product-card"] a[href]',
+                '[class*="product_card"] a[href]',
+                '[class*="ProductCard"] a[href]',
+                '[class*="catalog-item"] a[href]',
+                '[class*="item-card"] a[href]',
+                '[class*="goods-item"] a[href]',
+                '[class*="product-item"] a[href]',
+                '[class*="product-tile"] a[href]',
                 '.product a[href]',
                 'article a[href]',
             ]
+            const seen = new Set()
+            const results = []
             for (const sel of cardSelectors) {
-                const el = document.querySelector(sel)
-                if (el && el.href) return el.href
+                for (const el of document.querySelectorAll(sel)) {
+                    if (el.href && !seen.has(el.href)) {
+                        seen.add(el.href)
+                        results.push(el.href)
+                        if (results.length >= maxLinks) return results
+                    }
+                }
             }
-            // Fallback: ссылка с числовым id в пути
-            const links = [...document.querySelectorAll('a[href]')]
-            const card = links.find(a => /\\/(product|tovar|item|goods?|p)\\/[\\w-]*\\d+/i.test(a.href)
-                                     || /\\/[\\w-]+-\\d{5,}\\/?$/.test(a.href))
-            return card?.href || null
-        }""")
-        if href and href.startswith("http") and _domain_of(href) == _domain_of(base_url):
-            return href
+            // Fallback: ссылки с числовым id в пути
+            for (const a of document.querySelectorAll('a[href]')) {
+                if (!seen.has(a.href) && (
+                    /(product|tovar|item|goods?|p)\\/[\\w-]*\\d+/i.test(a.href) ||
+                    /\\/[\\w-]+-\\d{5,}\\/?$/.test(a.href)
+                )) {
+                    seen.add(a.href)
+                    results.push(a.href)
+                    if (results.length >= maxLinks) return results
+                }
+            }
+            return results
+        }""", max_links)
+        domain = _domain_of(base_url)
+        return [h for h in (hrefs or []) if h.startswith("http") and _domain_of(h) == domain]
     except Exception:
-        pass
-    return None
+        return []
 
 
-async def process_url(page, url: str, query: str, use_qwen: bool = False) -> RunetProduct | None:
+def _make_product(data: dict, url: str) -> RunetProduct | None:
+    """Строит RunetProduct из словаря данных, извлечённых одним из методов."""
+    price = data.get("price", 0)
+    name = data.get("name", "").strip()
+    image = data.get("image_url") or ""
+    if not name or price <= 0:
+        return None
+    if image and not image.startswith("http"):
+        base = f"{urlparse(url).scheme}://{urlparse(url).netloc}"
+        image = urljoin(base, image)
+    if not image or not image.startswith("http"):
+        image = ""
+        logger.debug("Нет картинки для %s — товар добавляем без фото", url)
+    method = data.get("method", "qwen")
+    confidence = CONFIDENCE_BY_METHOD.get(method, 0.4)
+    if data.get("characteristics"):
+        confidence = min(1.0, confidence + 0.05)
+    logger.info("[%s conf=%.2f] %s — %.0f ₽", method, confidence, name[:50], price)
+    return RunetProduct(
+        name=name, price=price, image_url=image, source_url=url,
+        characteristics=data.get("characteristics", {}),
+        confidence=confidence, extraction_method=method,
+    )
+
+
+async def process_url(page, url: str, query: str, use_qwen: bool = False) -> list[RunetProduct]:
     """
-    Пробует извлечь товар с URL.
+    Пробует извлечь товар(ы) с URL.
     Стратегия: JSON-LD → OpenGraph → DOM → Qwen (только если use_qwen=True).
-    Если URL оказался листингом — следует по ссылке на первую карточку.
+    Если URL оказался листингом — следует по ссылкам на несколько карточек.
+    Возвращает список (0, 1 или несколько продуктов).
     """
     html = await load_page(page, url)
     if not html:
-        return None
+        return []
 
     # Проверяем заголовок на агрегатор цен
     page_title = (await page.title()).lower()
     aggregator_title_signs = ("где дешевле", "сравнить цены", "сравнение цен", "лучшая цена", "где купить дешевле")
     if any(s in page_title for s in aggregator_title_signs):
         logger.info("Агрегатор по заголовку, пропускаем: %s", url)
-        return None
+        return []
 
-    # Проверяем: может это листинг/агрегатор (много цен)? Ищем карточку товара.
+    # Проверяем: может это листинг/агрегатор (много цен)?
     price_count = await page.evaluate("""() => {
         return document.querySelectorAll('[class*="price"],[itemprop="price"],[data-price]').length
     }""")
 
     if price_count > 4:
-        product_url = await _find_product_link(page, url)
-        if product_url and product_url != url:
-            logger.info("Листинг → переходим на карточку: %s", product_url)
-            html = await load_page(page, product_url)
-            if not html:
-                return None
-            url = product_url
-        else:
-            # Агрегатор цен без карточки — парсить бессмысленно
-            logger.info("Агрегатор/листинг без карточки, пропускаем: %s", url)
-            return None
+        # Листинг — извлекаем несколько карточек
+        card_links = await _find_product_links(page, url, max_links=4)
+        if not card_links:
+            logger.info("Агрегатор/листинг без карточек, пропускаем: %s", url)
+            return []
+        logger.info("Листинг (%d карточек): %s", len(card_links), url)
+        results = []
+        for card_url in card_links:
+            card_html = await load_page(page, card_url)
+            if not card_html:
+                continue
+            data = (
+                extract_jsonld(card_html)
+                or extract_opengraph(card_html)
+                or await extract_from_dom(page, card_url)
+            )
+            if data:
+                p = _make_product(data, card_url)
+                if p and p.is_valid():
+                    results.append(p)
+        return results
 
-    # Пробуем по приоритету
+    # Прямая карточка — пробуем по приоритету
     data = (
         extract_jsonld(html)
         or extract_opengraph(html)
         or await extract_from_dom(page, url)
     )
 
-    # Qwen — только если явно включён и модель уже загружена
     if not data and use_qwen:
         page_text = await page.evaluate("() => document.body?.innerText || ''")
         data = qwen_extract(query, page_text, url)
 
     if not data:
-        return None
+        return []
 
-    # Финальная валидация
-    price = data.get("price", 0)
-    name = data.get("name", "").strip()
-    image = data.get("image_url") or ""
-
-    if not name or price <= 0:
-        return None
-
-    # Резолвим относительный URL картинки
-    if image and not image.startswith("http"):
-        base = f"{urlparse(url).scheme}://{urlparse(url).netloc}"
-        image = urljoin(base, image)
-
-    # Картинка желательна, но не блокируем товар если её нет
-    if not image or not image.startswith("http"):
-        image = ""
-        logger.debug("Нет картинки для %s — товар добавляем без фото", url)
-
-    method = data.get("method", "qwen")
-    confidence = CONFIDENCE_BY_METHOD.get(method, 0.4)
-
-    # Бонус к уверенности: больше характеристик — больше доверия
-    if data.get("characteristics"):
-        confidence = min(1.0, confidence + 0.05)
-
-    logger.info("[%s conf=%.2f] %s — %.0f ₽", method, confidence, name[:50], price)
-
-    return RunetProduct(
-        name=name,
-        price=price,
-        image_url=image,
-        source_url=url,
-        characteristics=data.get("characteristics", {}),
-        confidence=confidence,
-        extraction_method=method,
-    )
+    p = _make_product(data, url)
+    return [p] if p and p.is_valid() else []
 
 
 # ---------------------------------------------------------------------------
 # Главный метод
 # ---------------------------------------------------------------------------
 
-async def search_runet(query: str, region: str = "Москва") -> list[RunetProduct]:
-    """
-    Полный пайплайн: DDG → Playwright → извлечение → валидация.
-    Возвращает до MAX_PRODUCTS товаров с image_url, price, characteristics.
-    """
-    ddg_query = f"{query} {region}" if region else query
+async def _search_runet_impl(query: str, region: str = "Москва") -> list[RunetProduct]:
+    ddg_query = f"{query} купить цена {region}" if region else f"{query} купить цена"
     scored_urls = await ddg_search(ddg_query)
     if not scored_urls:
         return []
 
-    products: list[RunetProduct] = []
+    candidates: list[RunetProduct] = []
 
     async with async_playwright() as pw:
         browser = await pw.chromium.launch(headless=True)
@@ -747,20 +759,57 @@ async def search_runet(query: str, region: str = "Москва") -> list[RunetPr
         page = await context.new_page()
 
         for url, score in scored_urls:
-            if len(products) >= MAX_PRODUCTS:
+            if len(candidates) >= MAX_CANDIDATES:
                 break
 
             logger.info("Парсим [score=%.2f]: %s", score, url)
-            product = await process_url(page, url, query, use_qwen=False)
-            if product and product.is_valid():
-                products.append(product)
+            products = await process_url(page, url, query, use_qwen=False)
+            for p in products:
+                candidates.append(p)
+                if len(candidates) >= MAX_CANDIDATES:
+                    break
 
-            await asyncio.sleep(1.5)
+            await asyncio.sleep(0.3)
 
         await browser.close()
 
-    logger.info("Рунет итого: %d товаров для '%s'", len(products), query)
+    # Медианный отбор: из всех собранных карточек оставляем MAX_PRODUCTS
+    # вокруг медианной цены, выбросы (1₽, опт, премиум) отбрасываем.
+    if len(candidates) > MAX_PRODUCTS:
+        s = sorted(candidates, key=lambda p: p.price)
+        drop = len(s) // 10
+        core = s[drop: len(s) - drop] if drop > 0 else s
+        mid = len(core) // 2
+        half = MAX_PRODUCTS // 2
+        start = max(0, mid - half)
+        end = min(len(core), start + MAX_PRODUCTS)
+        start = max(0, end - MAX_PRODUCTS)
+        products = core[start:end]
+    else:
+        products = candidates
+
+    logger.info("Рунет итого: %d медианных товаров из %d кандидатов для '%s'",
+                len(products), len(candidates), query)
     return products
+
+
+async def search_runet(query: str, region: str = "Москва") -> list[RunetProduct]:
+    """
+    Полный пайплайн: DDG → Playwright → извлечение → валидация.
+    Возвращает до MAX_PRODUCTS товаров с image_url, price, characteristics.
+    Жёсткий таймаут RUNET_TOTAL_TIMEOUT секунд.
+    """
+    try:
+        return await asyncio.wait_for(
+            _search_runet_impl(query, region),
+            timeout=RUNET_TOTAL_TIMEOUT,
+        )
+    except asyncio.TimeoutError:
+        logger.warning("Рунет: превышен таймаут %ds для '%s'", RUNET_TOTAL_TIMEOUT, query)
+        return []
+    except Exception as e:
+        logger.warning("Рунет ошибка: %s", e)
+        return []
 
 
 # ---------------------------------------------------------------------------

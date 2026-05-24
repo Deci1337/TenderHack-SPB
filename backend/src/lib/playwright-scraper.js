@@ -10,10 +10,11 @@ function parsePrice(raw) {
 }
 
 function normalizePrice(value) {
+  // WB API (v9/v18) всегда отдаёт цену в копейках в sizes[].price.product, salePriceU, priceU.
+  // Делим на 100 безусловно — иначе товары дешевле 100₽ показывались бы x100.
   const p = parsePrice(value);
   if (!Number.isFinite(p)) return NaN;
-  if (p >= 10000) return Math.round(p / 100);
-  return Math.round(p);
+  return Math.round(p / 100);
 }
 
 async function launchBrowser({ proxyUrl } = {}) {
@@ -168,7 +169,7 @@ async function wbThrottle() {
   _wbLastRequestAt = Date.now();
 }
 
-async function fetchWbApiWithRetry(query, { timeoutMs = 15000, maxRetries = 8 } = {}) {
+async function fetchWbApiWithRetry(query, { timeoutMs = 15000, maxRetries = 4 } = {}) {
   let lastStatus = 0;
   let lastUrl = '';
   for (let i = 0; i < maxRetries; i += 1) {
@@ -203,7 +204,7 @@ async function fetchWbApiWithRetry(query, { timeoutMs = 15000, maxRetries = 8 } 
       clearTimeout(timer);
     }
     // Exponential backoff with jitter: ~0.6–1.4× of base, capped, so retries aren't rhythmic.
-    const base = Math.min(1000 * 2 ** i, 10000);
+    const base = Math.min(800 * 2 ** i, 4000);
     await sleep(Math.round(base * (0.6 + Math.random() * 0.8)));
   }
   return { ok: false, status: lastStatus, json: null, url: lastUrl, attempt: maxRetries };
@@ -212,7 +213,7 @@ async function fetchWbApiWithRetry(query, { timeoutMs = 15000, maxRetries = 8 } 
 async function scrapeWildberriesApi({ normalizedQuery, limit = 20, timeoutMs = 15000 } = {}) {
   const attempts = [];
 
-  const res = await fetchWbApiWithRetry(normalizedQuery.normalized, { timeoutMs });
+  const res = await fetchWbApiWithRetry(normalizedQuery.original, { timeoutMs });
   attempts.push({
     step: 'search_api_fetch',
     endpoint: res.url.slice(0, 100),
@@ -242,10 +243,23 @@ async function scrapeWildberriesApi({ normalizedQuery, limit = 20, timeoutMs = 1
     const price = normalizePrice(rawPrice);
     if (!product.name || !Number.isFinite(price)) continue;
 
+    // WB CDN image URL: basket number derived from nmId (verified formula May 2026)
+    const vol = Math.floor(id / 100000);
+    const part = Math.floor(id / 1000);
+    const basket = (
+      vol <= 143 ? '01' : vol <= 287 ? '02' : vol <= 431 ? '03' : vol <= 719 ? '04' :
+      vol <= 1007 ? '05' : vol <= 1061 ? '06' : vol <= 1115 ? '07' : vol <= 1169 ? '08' :
+      vol <= 1313 ? '09' : vol <= 1601 ? '10' : vol <= 1655 ? '11' : vol <= 1919 ? '12' :
+      vol <= 2045 ? '13' : vol <= 2189 ? '14' : vol <= 2405 ? '15' : vol <= 2621 ? '16' :
+      vol <= 2837 ? '17' : vol <= 3053 ? '18' : vol <= 3269 ? '19' : vol <= 3485 ? '20' :
+      vol <= 3701 ? '21' : vol <= 3917 ? '22' : vol <= 4133 ? '23' : vol <= 4349 ? '24' : '25'
+    );
+    const image_url = `https://basket-${basket}.wbbasket.ru/vol${vol}/part${part}/${id}/images/c246x328/1.jpg`;
+
     offers.push(toOffer('wildberries', {
       title: product.name ?? '',
       price,
-      image_url: '',
+      image_url,
       product_url: `https://www.wildberries.ru/catalog/${id}/detail.aspx`,
       features: [product.brand, product.subjectName].filter(Boolean),
       availability: 'unknown',
@@ -351,7 +365,7 @@ async function scrapeOzonPlaywright({ normalizedQuery, limit = 20, timeoutMs = 6
       }
     });
 
-    const searchUrl = `https://www.ozon.ru/search/?text=${encodeURIComponent(normalizedQuery.normalized)}&from_global=true`;
+    const searchUrl = `https://www.ozon.ru/search/?text=${encodeURIComponent(normalizedQuery.original)}&from_global=true`;
     attempts.push({ step: 'search_page', endpoint: searchUrl, blocked: false, ok: true });
     await page.goto(searchUrl, { waitUntil: 'domcontentloaded', timeout: timeoutMs });
     await page.waitForTimeout(8000);
@@ -369,11 +383,21 @@ async function scrapeOzonPlaywright({ normalizedQuery, limit = 20, timeoutMs = 6
       }
     }
 
-    // Collect from intercepted API or HTML
-    const allProducts = apiProducts.length > 0 ? apiProducts : (() => {
-      const html = page.content ? [] : [];
-      return html;
-    })();
+    // Collect from intercepted API or HTML fallback
+    let allProducts = apiProducts;
+    if (allProducts.length === 0) {
+      try {
+        const html = await page.content();
+        allProducts = parseOzonProducts(html).map(p => ({
+          title: p.name ?? p.title ?? '',
+          price: p.price ?? 0,
+          image_url: p.image ?? p.image_url ?? '',
+          product_url: p.url ?? p.product_url ?? '',
+          features: [],
+          availability: 'unknown',
+        })).filter(p => p.title && p.price > 0);
+      } catch { /* ignore */ }
+    }
 
     const seen = new Set();
     const offers = [];
@@ -410,13 +434,15 @@ function parseYandexMarketProducts(html) {
   while ((m = noframesRe.exec(html)) !== null) {
     try {
       const blob = JSON.parse(m[1]);
-      const prodMap = blob?.collections?.product ?? {};
-      for (const [id, p] of Object.entries(prodMap)) {
-        if (p && (p.titles?.raw || p.titles?.highlighted)) {
-          products.push({ _ymId: id, ...p });
+      const collections = blob?.collections ?? {};
+      for (const collData of Object.values(collections)) {
+        if (!collData || typeof collData !== 'object') continue;
+        for (const [id, p] of Object.entries(collData)) {
+          if (p && typeof p === 'object' && (p.titles?.raw || p.titles?.highlighted)) {
+            products.push({ _ymId: id, ...p });
+          }
         }
       }
-      // offers enrich prices but products already have prices.min — skip dedup complexity.
     } catch { /* ignore */ }
   }
   if (products.length > 0) return products;
@@ -488,7 +514,7 @@ const YM_RS_TOKEN = 'eJwzEv_EKMLBKLDwEKsEg8azbh6NVUdYNT6fYQUAWiMIFg,,';
 
 async function scrapeYandexMarketFetch({ normalizedQuery, limit = 20, timeoutMs = 15000 } = {}) {
   const attempts = [];
-  const url = `https://market.yandex.ru/search?text=${encodeURIComponent(normalizedQuery.normalized)}&rs=${encodeURIComponent(YM_RS_TOKEN)}`;
+  const url = `https://market.yandex.ru/search?text=${encodeURIComponent(normalizedQuery.original)}&rs=${encodeURIComponent(YM_RS_TOKEN)}`;
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), timeoutMs);
   const ymCookie = process.env.YM_COOKIE ?? '';
@@ -570,7 +596,7 @@ async function scrapeYandexMarketPlaywright({ normalizedQuery, limit = 20, timeo
       }
     });
 
-    const searchUrl = `https://market.yandex.ru/search?text=${encodeURIComponent(normalizedQuery.normalized)}`;
+    const searchUrl = `https://market.yandex.ru/search?text=${encodeURIComponent(normalizedQuery.original)}`;
     attempts.push({ step: 'search_page', endpoint: searchUrl, blocked: false, ok: true });
     await page.goto(searchUrl, { waitUntil: 'domcontentloaded', timeout: timeoutMs });
     await page.waitForTimeout(8000);

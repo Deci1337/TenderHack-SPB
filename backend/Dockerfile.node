@@ -1,0 +1,16 @@
+# Общий Node-образ для stealth-proxy и parser-server.
+# Базируется на официальном Playwright-образе с уже установленным Chromium и зависимостями.
+FROM mcr.microsoft.com/playwright:v1.55.0-noble
+
+WORKDIR /app
+
+# wget для healthcheck-ов docker-compose
+RUN apt-get update && apt-get install -y --no-install-recommends wget \
+    && rm -rf /var/lib/apt/lists/*
+
+COPY package.json package-lock.json ./
+RUN npm ci --omit=dev
+
+COPY . .
+
+# CMD задаётся в docker-compose (node stealth-proxy.js или node server.js)
