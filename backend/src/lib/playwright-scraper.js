@@ -173,8 +173,9 @@ async function fetchWbApiWithRetry(query, { timeoutMs = 15000, maxRetries = 4 } 
   let lastStatus = 0;
   let lastUrl = '';
   for (let i = 0; i < maxRetries; i += 1) {
-    // Alternate endpoint style (v18 ↔ v9), region and UA to dodge per-IP throttling.
-    const style = i % 2 === 0 ? 'v18' : 'v9';
+    // v9 (search.wb.ru) works without cookies; v18 (www.__internal) needs auth → 498.
+    // Try v9 on first 3 attempts with different regions, fall back to v18 last.
+    const style = i < 3 ? 'v9' : 'v18';
     const dest = pick(WB_DESTS, Math.floor(i / 2));
     const url = buildWbUrl(style, dest, query);
     lastUrl = url;

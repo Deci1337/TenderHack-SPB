@@ -101,7 +101,7 @@ const server = http.createServer(async (req, res) => {
 
     const result = await SCRAPERS[source]({
       normalizedQuery: normalizedQ,
-      limit: 30,
+      limit: 40,
       city,
       timeoutMs: 45000,
       enrichSpecs: false,

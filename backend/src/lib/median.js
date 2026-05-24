@@ -7,7 +7,8 @@ export function selectMedianProducts(items, count = 8) {
   if (!Array.isArray(items) || items.length === 0) return []
   if (items.length <= count) return items
   const sorted = [...items].sort((a, b) => (a.price ?? 0) - (b.price ?? 0))
-  const dropEach = Math.floor(sorted.length * 0.1)
+  // Drop outliers only when we have a comfortable surplus (2× count); otherwise all items are core.
+  const dropEach = sorted.length >= count * 2 ? Math.floor(sorted.length * 0.1) : 0
   const core = dropEach > 0 ? sorted.slice(dropEach, sorted.length - dropEach) : sorted
   if (core.length <= count) return core
   const midIdx = Math.floor(core.length / 2)
