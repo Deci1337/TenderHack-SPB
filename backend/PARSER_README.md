@@ -1,13 +1,12 @@
 # marketplace-parser
 
-Система сбора ценовых предложений из 5 источников для расчёта НМЦК по 44-ФЗ.
+Система сбора ценовых предложений из 4 источников для расчёта НМЦК по 44-ФЗ.
 
 | Источник | Стек | Эндпоинт/интерфейс |
 |----------|------|--------------------|
 | Wildberries | Node.js, stealth-браузер | CLI / `pipeline.js` |
 | Ozon | Node.js, stealth-браузер | CLI / `pipeline.js` |
 | Яндекс Маркет | Node.js, stealth-браузер | CLI / `pipeline.js` |
-| OLDI | Node.js, прямой HTTP | CLI / `pipeline.js` |
 | Рунет (DDG + Playwright) | Python, FastAPI | `GET /api/search/runet` |
 
 **Node.js-часть** (`src/`) — структурированный парсинг маркетплейсов: цена, характеристики, изображение, доставка.  
@@ -64,7 +63,7 @@ STEALTH_BROWSER_URL=http://127.0.0.1:9377
 
 > **Важно про IP:** датацентровые IP блокируются WB и Ozon по ASN.
 > Для стабильной работы нужен резидентный прокси (`HTTPS_PROXY`).
-> OLDI работает без ограничений, YM работает с большинства IP через stealth-браузер.
+> YM работает с большинства IP через stealth-браузер.
 
 ## Запуск
 
@@ -130,7 +129,6 @@ node src/cli.js "кофемашина" --schema --limit 10
 | Wildberries | DOM-парсинг карточки через stealth-браузер (`th.cellKey` + `td.cellValue`) |
 | Ozon | DOM-парсинг `dl/dt/dd` внутри `[data-widget="webCharacteristics"]` |
 | Яндекс Маркет | DOM-парсинг `[data-auto="product-spec"]` пар |
-| OLDI | Берётся из структуры каталога (без дополнительного запроса) |
 
 Характеристики собираются с карточек товаров параллельно для топ-5 офферов каждого источника.
 
@@ -149,7 +147,6 @@ src/
     ├── item-details.js       # Сбор характеристик с карточек товаров
     ├── playwright-scraper.js # WB API + Playwright fallback
     ├── wildberries-api.js    # WB internal API (v18/v9)
-    ├── oldi.js               # OLDI парсер
     ├── product-pages.js      # HTTP-парсер страниц (fallback)
     ├── query.js              # Нормализация запросов и скоринг
     └── universal-schema.js   # Единая JSON-схема ответа
@@ -167,7 +164,6 @@ node --test
 - **Wildberries**: stealth-браузер → WB internal API → fallback. От датацентровых IP блокируется.
 - **Ozon**: stealth-браузер → Ozon API → fallback. Требует резидентного IP или хорошего прокси.
 - **Яндекс Маркет**: stealth-браузер → HTTP-fallback. Работает с большинства IP.
-- **OLDI**: прямой HTTP-парсинг, без авторизации, без ограничений.
 
 ### Python источник (FastAPI)
 - **Рунет** (`GET /api/search/runet?q=...&region=...`): поиск через DuckDuckGo Lite → ранжирование URL по коммерческим сигналам → извлечение цены/изображения через JSON-LD, OpenGraph или DOM (Playwright). Берёт топ-20 URL из DDG. Работает с любого IP, не требует прокси.
