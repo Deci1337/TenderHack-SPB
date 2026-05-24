@@ -1,7 +1,6 @@
 """
 LLM-сервис: расширение поискового запроса (expand_query) и автодополнение (suggest_completions)
 
-
 Модель: Qwen/Qwen3-4B-Instruct-2507, HuggingFace transformers, локально.
 Остальное (НМЦК) — чистая математика без LLM.
 """
@@ -13,74 +12,21 @@ from functools import lru_cache
 from threading import Lock
 
 import numpy as np
-import torch
-from transformers import AutoModelForCausalLM, AutoTokenizer
+
+from query_normalize import (
+    MAX_QUERY_LEN,
+    MIN_QUERY_LEN,
+    clean_query,
+    is_product_query,
+    normalize_query,
+)
 
 logger = logging.getLogger(__name__)
 
 MODEL_NAME = "Qwen/Qwen3-4B-Instruct-2507"
 
-# ---------------------------------------------------------------------------
-# Пре-фильтрация: не тратим LLM на нетоварные запросы, чистим запросы от мусора
-# ---------------------------------------------------------------------------
-
-_NON_PRODUCT_WORDS = (
-    "где ", "как ", "почему ", "когда ", "сколько ", "какой ", "что такое ",
-    "сколько стоит", "какой ", "что такое ",
-    "погода ", "доставка ", "скидка ", "акция ",
-    "купить ", "заказать ", "найти ", "поискать ",
-    "где", "как", "почему", "когда", "сколько", "какой", "какая", "какие",
-    "что", "такое", "погода", "доставка", "скидка", "акция",
-    "купить", "заказать", "найти", "поискать", "пожалуйста", "можно",
-)
-_MIN_QUERY_LEN = 3
-_MAX_QUERY_LEN = 200
-
-def clean_query(query: str) -> str:
-    """Удаляет все стоп-слова и фразы из запроса."""
-    q = query.lower().strip()
-    
-    for word in _NON_PRODUCT_WORDS:
-        # Если фраза с пробелом в конце - удаляем только в начале или с пробелом
-        if word.endswith(' '):
-            if q.startswith(word):
-                q = q[len(word):]
-            q = q.replace(f' {word}', ' ')
-        else:
-            q = q.replace(f' {word} ', ' ')
-            if q.startswith(f'{word} '):
-                q = q[len(word)+1:]
-            if q.endswith(f' {word}'):
-                q = q[:-len(word)-1]
-            if q == word:
-                q = ''
-    
-    q = ' '.join(q.split())
-    
-    return q if q else query
-
-
-def is_product_query(query: str) -> bool:
-    """Проверяет, стоит ли обрабатывать запрос."""
-    q = query.strip()
-    if len(q) < _MIN_QUERY_LEN or len(q) > _MAX_QUERY_LEN:
-        return False
-    
-    # Только цифры/пунктуация — бессмысленно
-    if re.fullmatch(r'[\d\s\W]+', q):
-        return False
-    
-    # Повтор одного символа 4+ раз подряд
-    if re.search(r'(.)\1{3,}', q):
-        return False
-    
-    cleaned = clean_query(q)
-    return len(cleaned) != 0
-
-
-# ---------------------------------------------------------------------------
-# Singleton загрузка модели — один раз при старте, не на каждый запрос
-# ---------------------------------------------------------------------------
+# алиас для тестов
+_normalize_query = normalize_query
 
 _model = None
 _tokenizer = None
@@ -91,6 +37,9 @@ def _load_model():
     global _model, _tokenizer
     if _model is not None:
         return _model, _tokenizer
+
+    import torch
+    from transformers import AutoModelForCausalLM, AutoTokenizer
 
     with _lock:
         if _model is not None:  # double-checked locking
@@ -126,6 +75,8 @@ def _extract_json_object(response: str) -> dict | None:
 
 
 def _run_chat_completion(messages: list[dict], *, max_new_tokens: int = 120) -> str:
+    import torch
+
     model, tokenizer = _load_model()
     try:
         text = tokenizer.apply_chat_template(
@@ -187,22 +138,22 @@ def expand_query(query: str) -> list[str]:
     if not original or len(original) < 2:
         return []
 
-    cleaned = clean_query(original)
-    if not cleaned or len(cleaned) < _MIN_QUERY_LEN:
+    normalized = _normalize_query(original)
+    if not normalized or len(normalized) < MIN_QUERY_LEN:
         return []
 
     # Пре-фильтр: явный мусор или нетоварный запрос → сразу пусто
-    if not is_product_query(cleaned):
+    if not is_product_query(normalized):
         return []
 
     try:
-        messages = [{"role": "user", "content": _PROMPT.format(query=cleaned)}]
+        messages = [{"role": "user", "content": _PROMPT.format(query=normalized)}]
         response = _run_chat_completion(messages, max_new_tokens=100)
-        return _parse_response(response, cleaned)
+        return _parse_response(response, normalized)
 
     except Exception as e:
-        logger.warning("expand_query failed (%s), searching by cleaned query", e)
-        return [cleaned]
+        logger.warning("expand_query failed (%s), searching by normalized query", e)
+        return [normalized]
 
 
 def _parse_response(response: str, original: str) -> list[str]:
@@ -243,7 +194,7 @@ def _parse_response(response: str, original: str) -> list[str]:
 # suggest_completions — автодополнение запроса (как в поисковике)
 # ---------------------------------------------------------------------------
 
-_SUGGEST_CATEGORIES = ("Шины", "Оргтехника", "Одежда", "Мебель", "Канцелярия")
+_SUGGEST_CATEGORIES = ("Шины", "Оргтехника", "Одежда")
 
 _SUGGEST_PROMPT = (
     'Пользователь вводит поисковый запрос товара для госзакупки: "{prefix}"\n\n'
@@ -267,7 +218,13 @@ _SUGGEST_PROMPT = (
 )
 
 
-def _parse_suggest_response(response: str, prefix: str, limit: int) -> list[dict]:
+def _parse_suggest_response(
+    response: str,
+    prefix: str,
+    limit: int,
+    *,
+    extra_prefixes: tuple[str, ...] = (),
+) -> list[dict]:
     """Возвращает [{text, category, score}, ...] отсортированные по score."""
     data = _extract_json_object(response)
     if not data:
@@ -277,8 +234,11 @@ def _parse_suggest_response(response: str, prefix: str, limit: int) -> list[dict
     if not isinstance(raw, list):
         return []
 
-    prefix_lower = prefix.strip().lower()
-    prefix_words = prefix_lower.split()
+    accepted: list[str] = []
+    for p in (prefix, *extra_prefixes):
+        p = p.strip().lower()
+        if p and p not in accepted:
+            accepted.append(p)
 
     parsed: list[dict] = []
     seen_text: set[str] = set()
@@ -296,18 +256,16 @@ def _parse_suggest_response(response: str, prefix: str, limit: int) -> list[dict
         else:
             continue
 
-        if not text or len(text) < len(prefix_lower):
-            continue
-
-        key = text.lower()
-        if key in seen_text:
+        if not text:
             continue
 
         text_lower = text.lower()
-        # Должно продолжать ввод: начинается с префикса или с его исправленного первого слова
-        if not text_lower.startswith(prefix_lower):
-            if not prefix_words or not text_lower.startswith(prefix_words[0]):
-                continue
+        if not _text_matches_prefixes(text_lower, accepted):
+            continue
+
+        key = text_lower
+        if key in seen_text:
+            continue
 
         if category not in _SUGGEST_CATEGORIES:
             category = "Подсказки"
@@ -321,6 +279,16 @@ def _parse_suggest_response(response: str, prefix: str, limit: int) -> list[dict
 
     parsed.sort(key=lambda x: x["score"], reverse=True)
     return parsed[:limit]
+
+
+def _text_matches_prefixes(text_lower: str, prefixes: list[str]) -> bool:
+    for prefix_lower in prefixes:
+        if text_lower.startswith(prefix_lower):
+            return True
+        first_word = prefix_lower.split()[0] if prefix_lower else ""
+        if first_word and text_lower.startswith(first_word):
+            return True
+    return False
 
 
 def _completions_to_groups(completions: list[dict]) -> list[dict]:
@@ -340,33 +308,22 @@ def _completions_to_groups(completions: list[dict]) -> list[dict]:
     return [buckets[c] for c in order]
 
 
-@lru_cache(maxsize=256)
-def suggest_completions(prefix: str, limit: int = 5) -> tuple:
-    """
-    Автодополнение поискового запроса через Qwen.
-    Возвращает tuple для lru_cache → список групп {category, items}.
-    При ошибке — пустой tuple ().
-    """
-    prefix = prefix.strip()
-    if len(prefix) < 2 or len(prefix) > _MAX_QUERY_LEN:
-        return ()
+_suggest_cache: dict[tuple[str, int], tuple] = {}
+_SUGGEST_CACHE_MAX = 256
 
-    if not is_product_query(prefix):
-        return ()
 
+def _run_suggest_llm(normalized: str, limit: int, raw_prefix: str) -> tuple:
+    """LLM + парсинг. Пустой tuple не кэшируется."""
     try:
-        cleaned = clean_query(prefix)
-        query_for_llm = cleaned if cleaned else prefix
-
         messages = [{
             "role": "user",
-            "content": _SUGGEST_PROMPT.format(
-                prefix=query_for_llm,
-                limit=limit,
-            ),
+            "content": _SUGGEST_PROMPT.format(prefix=normalized, limit=limit),
         }]
         response = _run_chat_completion(messages, max_new_tokens=350)
-        completions = _parse_suggest_response(response, query_for_llm, limit)
+        extra = (raw_prefix,) if raw_prefix.lower() != normalized.lower() else ()
+        completions = _parse_suggest_response(
+            response, normalized, limit, extra_prefixes=extra,
+        )
         if not completions:
             return ()
 
@@ -376,6 +333,41 @@ def suggest_completions(prefix: str, limit: int = 5) -> tuple:
     except Exception as e:
         logger.warning("suggest_completions failed (%s)", e)
         return ()
+
+
+def clear_suggest_cache() -> None:
+    _suggest_cache.clear()
+
+
+def suggest_completions(prefix: str, limit: int = 5) -> tuple:
+    """
+    Автодополнение поискового запроса через Qwen.
+    Кэш по исправленному префиксу; пустые ответы не кэшируются.
+    """
+    prefix = prefix.strip()
+    if len(prefix) < 2 or len(prefix) > MAX_QUERY_LEN:
+        return ()
+
+    normalized = _normalize_query(prefix)
+    if len(normalized) < 2 or not is_product_query(normalized):
+        return ()
+
+    if normalized.lower() != prefix.lower():
+        logger.info("suggest spell-fix: %r -> %r", prefix, normalized)
+
+    cache_key = (normalized.lower(), limit)
+    if cache_key in _suggest_cache:
+        return _suggest_cache[cache_key]
+
+    result = _run_suggest_llm(normalized, limit, prefix)
+    if result:
+        if len(_suggest_cache) >= _SUGGEST_CACHE_MAX:
+            _suggest_cache.pop(next(iter(_suggest_cache)))
+        _suggest_cache[cache_key] = result
+    return result
+
+
+suggest_completions.cache_clear = clear_suggest_cache  # type: ignore[attr-defined]
 
 
 def suggest_completions_list(prefix: str, limit: int = 5) -> list[dict]:

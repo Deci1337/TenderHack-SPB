@@ -12,11 +12,8 @@ logger = logging.getLogger(__name__)
 
 PARSER_BASE = os.getenv("PARSER_SERVER_URL", "http://localhost:8008")
 
-# expand_query тянет Qwen модель (~8 ГБ). Включается после `python ml/download_model.py`
-# Чтобы включить — поставь USE_LLM=1 в окружении
-USE_LLM = os.getenv("USE_LLM") == "1"
-if USE_LLM:
-    from llm_service import expand_query, suggest_completions_list
+USE_LLM = True
+from llm_service import expand_query, suggest_completions_list
 
 app = FastAPI(title="PriceHunter API")
 
@@ -32,8 +29,6 @@ app.add_middleware(
 async def suggest(q: str = "", limit: int = 3):
     q = q.strip()
     if len(q) < 2:
-        return []
-    if not USE_LLM:
         return []
     try:
         loop = asyncio.get_running_loop()
@@ -65,16 +60,15 @@ async def search_runet_endpoint(q: str = "", region: str = "Москва"):
     # 1. Исправляем опечатки локально (symspellpy, без интернета)
     corrected = correct(q)
 
-    # 2. LLM расширяет запрос (если модель скачана и USE_LLM=1)
+    # 2. LLM расширяет запрос (Qwen, см. download_model.py)
     variants = [corrected]
-    if USE_LLM:
-        try:
-            loop = asyncio.get_running_loop()
-            ext = await loop.run_in_executor(None, expand_query, corrected)
-            if ext:
-                variants = ext
-        except Exception:
-            pass
+    try:
+        loop = asyncio.get_running_loop()
+        ext = await loop.run_in_executor(None, expand_query, corrected)
+        if ext:
+            variants = ext
+    except Exception:
+        pass
 
     # 3. Ищем по первому варианту
     primary = variants[0]

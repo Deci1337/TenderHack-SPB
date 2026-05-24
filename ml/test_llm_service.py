@@ -11,6 +11,7 @@ import pytest
 
 from llm_service import (
     _completions_to_groups,
+    _normalize_query,
     _parse_response,
     _parse_suggest_response,
     calculate_nmck,
@@ -114,6 +115,20 @@ class TestParseResponse:
 
 
 # ---------------------------------------------------------------------------
+# _normalize_query
+# ---------------------------------------------------------------------------
+
+class TestNormalizeQuery:
+    def test_spell_then_clean(self):
+        with patch("query_normalize.correct", return_value="принтер лазерный"):
+            assert _normalize_query("прнтер лазерный") == "принтер лазерный"
+
+    def test_strips_stop_words_after_spell(self):
+        with patch("query_normalize.correct", return_value="где принтер"):
+            assert _normalize_query("где прнтер") == "принтер"
+
+
+# ---------------------------------------------------------------------------
 # suggest_completions
 # ---------------------------------------------------------------------------
 
@@ -151,6 +166,22 @@ class TestSuggestCompletions:
             result = list(suggest_completions("принтер лаз", 5))
             assert len(result) >= 1
             assert any("принтер" in item for g in result for item in g["items"])
+
+    def test_suggest_runs_spell_before_llm(self):
+        mock_json = (
+            '{"completions": ['
+            '{"text": "принтер лазерный А4", "category": "Оргтехника", "score": 0.9}'
+            ']}'
+        )
+        with patch("query_normalize.correct", return_value="принтер") as mock_correct:
+            with patch("llm_service._run_chat_completion", return_value=mock_json) as mock_llm:
+                result = list(suggest_completions("прнтер", 5))
+                mock_correct.assert_called_once_with("прнтер")
+                assert mock_llm.call_args[0][0][0]["content"].startswith(
+                    'Пользователь вводит поисковый запрос'
+                )
+                assert "принтер" in mock_llm.call_args[0][0][0]["content"]
+                assert len(result) >= 1
 
 
 # ---------------------------------------------------------------------------
