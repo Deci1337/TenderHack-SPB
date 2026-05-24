@@ -43,8 +43,9 @@ PREFIXES = [
 
 SPELL_CASES = (
     ("клавиатура", "клавиатура"),
-    ("прнтер", "прнтер"),
+    ("прнтер", "принтер"),
     ("вебка", "вебка"),
+    ("бумгаа", "бумага"),
 )
 
 
@@ -53,9 +54,7 @@ def preflight_spell() -> None:
 
     ensure_dictionaries()
     paths = dictionary_paths()
-    print(f"Словари: {paths['main']}")
-    if Path(paths["domain"]).is_file():
-        print(f"         {paths['domain']}")
+    print(f"Domain-словарь: {paths['domain']}")
 
     for raw, expected in SPELL_CASES:
         got = correct(raw)
@@ -63,8 +62,8 @@ def preflight_spell() -> None:
         print(f"  [{status}] {raw!r} -> {got!r}")
         if got != expected:
             raise SystemExit(
-                f"Spell-check не исправил {raw!r} (получено {got!r}, ожидалось {expected!r}). "
-                "Проверьте наличие ml/ru_dict.txt в репозитории."
+                f"Spell-check: {raw!r} -> {got!r}, ожидалось {expected!r}. "
+                "Domain-словарь: опечатки в лексике закупок; сленг — без изменений."
             )
     print("Орфография: OK\n")
 

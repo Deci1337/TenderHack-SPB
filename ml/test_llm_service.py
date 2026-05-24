@@ -292,12 +292,10 @@ class TestFilterOutliers:
         assert 3000 not in result
 
     def test_removes_expensive_outlier(self):
-        # Один выброс сильно сдвигает среднее → нормальные цены тоже выбиваются
-        # → filtered < 5 → функция корректно возвращает оригинал
         prices = [12000, 12500, 13000, 12800, 13200, 50000]
         result = filter_outliers(prices)
-        assert isinstance(result, list)
-        assert len(result) >= 5  # не обрезало ниже порога
+        assert 50000 not in result
+        assert len(result) >= 5
 
     def test_removes_expensive_outlier_large_set(self):
         # При большой выборке выброс убирается без проблем
@@ -315,11 +313,11 @@ class TestFilterOutliers:
         result = filter_outliers(prices)
         assert result == prices
 
-    def test_does_not_filter_below_5(self):
-        # Если после фильтрации останется < 5 — возвращаем оригинал
+
+    def test_median_filters_extreme_outliers(self):
         prices = [100, 200, 15000, 16000, 17000]
         result = filter_outliers(prices)
-        assert result == prices
+        assert result == [15000, 16000, 17000]
 
     def test_iterative(self):
         # После первого прохода появляется новый выброс — должен убраться рекурсией
@@ -341,15 +339,27 @@ class TestCalculateNmck:
         assert r["nmck"] is not None
         assert r["filtered_count"] == 5
 
+    def test_success_with_three_prices(self):
+        prices = [12000.0, 12800.0, 13200.0]
+        r = calculate_nmck(prices)
+        assert r["status"] == "success"
+        assert r["nmck"] == 12800.0
+
     def test_no_data(self):
         r = calculate_nmck([])
         assert r["status"] == "no_data"
         assert r["nmck"] is None
 
     def test_insufficient_data(self):
-        r = calculate_nmck([1000.0, 2000.0, 3000.0])
+        r = calculate_nmck([1000.0, 2000.0])
         assert r["status"] == "insufficient_data"
-        assert r["price_count"] == 3
+        assert r["price_count"] == 2
+        assert r["can_calculate_nmck"] is False
+        assert "минимум 3" in r["message"]
+
+    def test_success_has_can_calculate(self):
+        r = calculate_nmck([12000.0, 12800.0, 13200.0])
+        assert r["can_calculate_nmck"] is True
 
     def test_outliers_filtered(self):
         prices = [12000, 12500, 13000, 12800, 13200, 500, 100000]

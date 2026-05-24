@@ -142,14 +142,18 @@ def expand_query(query: str) -> list[str]:
     if not normalized or len(normalized) < MIN_QUERY_LEN:
         return []
 
-    # Пре-фильтр: явный мусор или нетоварный запрос → сразу пусто
-    if not is_product_query(normalized):
+    # Пре-фильтр: мусор, погода, только стоп-слова
+    if not is_product_query(original) or not is_product_query(normalized):
         return []
 
     try:
         messages = [{"role": "user", "content": _PROMPT.format(query=normalized)}]
         response = _run_chat_completion(messages, max_new_tokens=100)
-        return _parse_response(response, normalized)
+        result = _parse_response(response, normalized)
+        if result:
+            return result
+        logger.info("expand_query: пустой ответ LLM для %r, ищем по нормализованному", normalized)
+        return [normalized]
 
     except Exception as e:
         logger.warning("expand_query failed (%s), searching by normalized query", e)
@@ -370,7 +374,7 @@ def suggest_completions(prefix: str, limit: int = 5) -> tuple:
 suggest_completions.cache_clear = clear_suggest_cache  # type: ignore[attr-defined]
 
 
-def suggest_completions_list(prefix: str, limit: int = 5) -> list[dict]:
+def suggest_completions_list(prefix: str, limit: int = 3) -> list[dict]:
     """Обёртка: list[dict] вместо tuple из кэша (копия, чтобы не мутировать кэш)."""
     cached = suggest_completions(prefix, limit)
     if not cached:
@@ -379,19 +383,22 @@ def suggest_completions_list(prefix: str, limit: int = 5) -> list[dict]:
 
 
 # ---------------------------------------------------------------------------
-# Фильтрация цен и расчёт НМЦК (44-ФЗ п.3.20) — без LLM, чистая математика
+# Фильтрация цен и расчёт НМЦК — медиана, отклонение ±33% от медианы, мин. 3 цены
 # ---------------------------------------------------------------------------
 
 def filter_outliers(prices: list[float], max_deviation: float = 0.33) -> list[float]:
-    """Итеративно отбрасывает цены с отклонением от среднего > 33%."""
+    """Итеративно отбрасывает цены с отклонением от медианы > 33%."""
     if len(prices) < 3:
         return prices
 
-    mean = float(np.mean(prices))
-    filtered = [p for p in prices if abs(p - mean) / mean <= max_deviation]
+    median = float(np.median(prices))
+    if median <= 0:
+        return prices
 
-    if len(filtered) < 5:
-        return prices  # слишком агрессивная фильтрация — берём оригинал
+    filtered = [p for p in prices if abs(p - median) / median <= max_deviation]
+
+    if len(filtered) < 3:
+        return prices
 
     if len(filtered) != len(prices):
         return filter_outliers(filtered, max_deviation)
@@ -399,57 +406,141 @@ def filter_outliers(prices: list[float], max_deviation: float = 0.33) -> list[fl
     return filtered
 
 
-def _select_closest_to_mean(prices: list[float], n: int = 5) -> list[float]:
-    if len(prices) <= n:
-        return prices
-    mean = float(np.mean(prices))
-    return sorted(prices, key=lambda p: abs(p - mean))[:n]
+def _median_deviation_pct(prices: list[float]) -> float:
+    if not prices:
+        return 0.0
+    median = float(np.median(prices))
+    if median <= 0:
+        return 0.0
+    return max(abs(p - median) / median for p in prices) * 100
 
 
 def calculate_nmck(prices: list[float]) -> dict:
-    """Расчёт НМЦК по 44-ФЗ п.3.20."""
+    """НМЦК = медиана после отсева выбросов (>33% от медианы). Минимум 3 цены."""
     if not prices:
-        return {"nmck": None, "status": "no_data", "price_count": 0,
-                "message": "Товары не найдены."}
+        return finalize_nmck({"nmck": None, "status": "no_data", "price_count": 0,
+                              "outliers": 0, "cv_ok": False})
 
-    if len(prices) < 5:
-        return {
-            "nmck": round(float(np.mean(prices)), 2),
+    price_count = len(prices)
+    all_min, all_max = min(prices), max(prices)
+    base = {
+        "price_count": price_count,
+        "price_range_min": round(all_min, 2),
+        "price_range_max": round(all_max, 2),
+    }
+
+    if price_count < 3:
+        return finalize_nmck({
+            **base,
+            "nmck": round(float(np.median(prices)), 2),
             "status": "insufficient_data",
-            "price_count": len(prices),
-            "message": f"Найдено {len(prices)} цен. Для 44-ФЗ нужно минимум 5.",
-        }
+            "outliers": 0,
+            "max_deviation_pct": round(_median_deviation_pct(prices), 1),
+        })
 
     filtered = filter_outliers(prices)
+    outliers = price_count - len(filtered)
+    max_dev_pct = round(_median_deviation_pct(filtered), 1)
 
-    if len(filtered) < 5:
-        return {
+    if len(filtered) < 3:
+        return finalize_nmck({
+            **base,
             "nmck": None,
             "status": "filtered_too_much",
-            "price_count": len(prices),
             "filtered_count": len(filtered),
-            "message": f"После отсева выбросов осталось {len(filtered)} из {len(prices)}. "
-                       f"Разброс цен слишком большой (от {min(prices):.0f} до {max(prices):.0f} ₽).",
-        }
+            "outliers": outliers,
+            "max_deviation_pct": max_dev_pct,
+        })
 
-    mean = float(np.mean(filtered))
-    max_dev = max(abs(p - mean) / mean for p in filtered)
-
-    if max_dev > 0.33:
-        return {
+    if max_dev_pct > 33:
+        return finalize_nmck({
+            **base,
             "nmck": None,
             "status": "deviation_too_high",
-            "max_deviation_pct": round(max_dev * 100, 1),
-            "message": f"Разброс {max_dev*100:.1f}% > 33%. Нужно больше источников.",
-        }
+            "filtered_count": len(filtered),
+            "outliers": outliers,
+            "max_deviation_pct": max_dev_pct,
+        })
 
-    return {
-        "nmck": round(mean, 2),
+    median = float(np.median(filtered))
+    return finalize_nmck({
+        **base,
+        "nmck": round(median, 2),
         "status": "success",
-        "price_count": len(prices),
         "filtered_count": len(filtered),
         "filtered_prices": filtered,
         "min_price": min(filtered),
         "max_price": max(filtered),
-        "message": f"НМЦК рассчитана по {len(filtered)} ценам.",
-    }
+        "outliers": outliers,
+        "max_deviation_pct": max_dev_pct,
+        "cv_ok": True,
+    })
+
+
+def finalize_nmck(result: dict) -> dict:
+    """Человекочитаемые сообщения и флаг can_calculate_nmck для фронта."""
+    status = result.get("status")
+
+    if status == "no_data":
+        return {
+            **result,
+            "message": "Товары не найдены. Попробуйте изменить запрос.",
+            "recommendation": "расширить_запрос",
+            "can_calculate_nmck": False,
+            "cv_ok": False,
+        }
+
+    if status == "insufficient_data":
+        count = result.get("price_count", 0)
+        return {
+            **result,
+            "message": (
+                f"Найдено только {count} "
+                f"{'цена' if count == 1 else 'цены' if 2 <= count <= 4 else 'цен'}. "
+                f"Для расчёта НМЦК нужно минимум 3."
+            ),
+            "recommendation": "расширить_запрос_или_добавить_источники",
+            "can_calculate_nmck": False,
+            "cv_ok": False,
+        }
+
+    if status == "filtered_too_much":
+        lo = result.get("price_range_min", 0)
+        hi = result.get("price_range_max", 0)
+        return {
+            **result,
+            "message": (
+                f"После отсева выбросов осталось только {result.get('filtered_count', 0)} "
+                f"из {result.get('price_count', 0)}. "
+                f"Разброс цен слишком большой ({lo:,.0f} — {hi:,.0f} ₽)."
+            ).replace(",", " "),
+            "recommendation": "добавить_источники_или_расширить_поиск",
+            "can_calculate_nmck": False,
+            "cv_ok": False,
+        }
+
+    if status == "deviation_too_high":
+        pct = result.get("max_deviation_pct", 0)
+        return {
+            **result,
+            "message": (
+                f"Разброс финальных цен превышает 33% от медианы "
+                f"(максимальное отклонение: {pct:.1f}%). "
+                f"НМЦК не рассчитана — добавьте больше источников."
+            ),
+            "recommendation": "добавить_источники",
+            "can_calculate_nmck": False,
+            "cv_ok": False,
+        }
+
+    if status == "success":
+        count = result.get("filtered_count", result.get("price_count", 0))
+        return {
+            **result,
+            "message": f"НМЦК рассчитана по {count} ценам (медиана).",
+            "recommendation": None,
+            "can_calculate_nmck": True,
+            "cv_ok": True,
+        }
+
+    return {**result, "can_calculate_nmck": False, "cv_ok": False}

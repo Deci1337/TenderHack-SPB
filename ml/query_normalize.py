@@ -18,6 +18,7 @@ _NON_PRODUCT_WORDS = (
 )
 MIN_QUERY_LEN = 3
 MAX_QUERY_LEN = 200
+_WEATHER_RE = re.compile(r"\bпогода\b", re.I)
 
 
 def clean_query(query: str) -> str:
@@ -39,7 +40,7 @@ def clean_query(query: str) -> str:
                 q = ""
 
     q = " ".join(q.split())
-    return q if q else query
+    return q
 
 
 def is_product_query(query: str) -> bool:
@@ -54,7 +55,14 @@ def is_product_query(query: str) -> bool:
     if re.search(r"(.)\1{3,}", q):
         return False
 
-    return len(clean_query(q)) != 0
+    if _WEATHER_RE.search(q):
+        return False
+
+    cleaned = clean_query(q)
+    if not cleaned or len(cleaned) < MIN_QUERY_LEN:
+        return False
+
+    return True
 
 
 def normalize_query(query: str) -> str:
@@ -63,5 +71,4 @@ def normalize_query(query: str) -> str:
     if not raw:
         return ""
     spelled = correct(raw) if len(raw) >= 3 else raw
-    cleaned = clean_query(spelled)
-    return cleaned if cleaned else spelled
+    return clean_query(spelled)

@@ -182,31 +182,54 @@ export default function ResultsPage() {
 
   const allLoaded = loadedSources.length === SOURCE_ORDER.length
 
-  const nmck = useMemo(() => {
-    if (!allLoaded || allProducts.length === 0) return null
-    const prices = allProducts.map(p => p.price).filter(Boolean).sort((a, b) => a - b)
-    if (prices.length === 0) return null
-    const mean = prices.reduce((s, p) => s + p, 0) / prices.length
-    const filtered = prices.filter(p => Math.abs(p - mean) / mean <= 0.33)
-    const valid = filtered.length >= 5 ? filtered : prices
-    const mid = Math.floor(valid.length / 2)
-    const median = valid.length % 2 === 0
-      ? (valid[mid - 1] + valid[mid]) / 2
-      : valid[mid]
-    const validMean = valid.reduce((s, p) => s + p, 0) / valid.length
-    const variance = valid.reduce((s, p) => s + (p - validMean) ** 2, 0) / valid.length
-    const cv = Math.round((Math.sqrt(variance) / validMean) * 100)
-    return {
-      total: allProducts.length,
-      sources: new Set(allProducts.map(p => p.source)).size,
-      median: Math.round(median),
-      min: Math.round(prices[0]),
-      max: Math.round(prices[prices.length - 1]),
-      outliers: prices.length - valid.length,
-      cv,
-      cvOk: cv <= 33,
+  const [nmck, setNmck] = useState(null)
+
+  useEffect(() => {
+    if (!allLoaded || allProducts.length === 0) {
+      setNmck(null)
+      return
     }
+
+    const prices = allProducts.map(p => p.price).filter(p => p > 0)
+    if (prices.length === 0) {
+      setNmck(null)
+      return
+    }
+
+    let cancelled = false
+    fetch('/api/nmck', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        prices,
+        product_count: allProducts.length,
+        source_count: new Set(allProducts.map(p => p.source)).size,
+      }),
+    })
+      .then(r => r.ok ? r.json() : null)
+      .then(data => {
+        if (cancelled || !data || data.status === 'no_data') return
+        setNmck({
+          total: data.product_count ?? allProducts.length,
+          sources: data.source_count ?? 1,
+          median: data.nmck != null ? Math.round(data.nmck) : null,
+          min: Math.round(data.price_range_min ?? Math.min(...prices)),
+          max: Math.round(data.price_range_max ?? Math.max(...prices)),
+          outliers: data.outliers ?? 0,
+          cv: data.max_deviation_pct ?? 0,
+          cvOk: data.cv_ok === true,
+          status: data.status,
+          message: data.message,
+          canCalculate: data.can_calculate_nmck === true,
+        })
+      })
+      .catch(() => { if (!cancelled) setNmck(null) })
+
+    return () => { cancelled = true }
   }, [allLoaded, allProducts])
+
+  const showNmck = allLoaded && nmck?.canCalculate && nmck.median != null
+  const showNmckWarning = allLoaded && nmck && !nmck.canCalculate && nmck.message
 
   return (
     <div style={{ minHeight: '100vh', background: '#F1F5F9' }}>
@@ -349,7 +372,24 @@ export default function ResultsPage() {
           )
         })}
 
-        {allLoaded && nmck && (
+        {showNmckWarning && (
+          <div
+            style={{
+              margin: '8px 0 24px',
+              background: '#FFFBEB',
+              border: '1px solid #FDE68A',
+              borderRadius: '12px',
+              padding: '16px 24px',
+              fontSize: '14px',
+              color: '#92400E',
+              lineHeight: 1.5,
+            }}
+          >
+            <strong>НМЦК не рассчитана.</strong> {nmck.message}
+          </div>
+        )}
+
+        {showNmck && (
           <div style={{
             margin: '8px 0 44px',
             background: '#FFFFFF',
@@ -365,7 +405,7 @@ export default function ResultsPage() {
               { label: 'Медиана', value: `${nmck.median.toLocaleString('ru-RU')} ₽`, sub: 'рекомендованная НМЦК', accent: true },
               { label: 'Диапазон цен', value: `${nmck.min.toLocaleString('ru-RU')} — ${nmck.max.toLocaleString('ru-RU')} ₽`, sub: 'мин — макс' },
               { label: 'Отброшено выбросов', value: `${nmck.outliers}`, sub: 'по 44-ФЗ п.3.20' },
-              { label: 'Коэф. вариации', value: `${nmck.cv}%`, sub: nmck.cvOk ? '✓ выборка однородна' : '⚠ разброс > 33%', warn: !nmck.cvOk },
+              { label: 'Отклонение от медианы', value: `${nmck.cv}%`, sub: nmck.cvOk ? '✓ в пределах 33%' : '⚠ разброс > 33%', warn: !nmck.cvOk },
               { label: 'Регион', value: region, sub: 'цены актуальны для региона' },
               ...(deliveryDays !== null ? [{
                 label: 'Срок поставки',
