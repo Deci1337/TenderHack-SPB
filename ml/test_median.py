@@ -4,7 +4,12 @@ pytest ml/test_median.py -v
 Тесты медианного отбора и проверка контракта 4 источников НМЦК.
 """
 
+import os
+import sys
+
 import pytest
+
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "backend"))
 
 from marketplace_parsers import MarketProduct, select_median_products
 

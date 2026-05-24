@@ -68,7 +68,7 @@ def preflight_spell() -> None:
     print("Орфография: OK\n")
 
 
-def test_prefix(prefix: str, limit: int) -> bool:
+def _print_prefix(prefix: str, limit: int) -> bool:
     from query_normalize import normalize_query
     from llm_service import clear_suggest_cache, suggest_completions_list
 
@@ -112,7 +112,7 @@ def run_all_tests() -> None:
     success = 0
     for prefix, limit in PREFIXES:
         try:
-            if test_prefix(prefix, limit):
+            if _print_prefix(prefix, limit):
                 success += 1
         except Exception as e:
             print(f"\nError for '{prefix}': {e}")
@@ -142,11 +142,11 @@ def main() -> None:
         run_all_tests()
     elif args.prefix:
         preflight_spell()
-        ok = test_prefix(args.prefix, args.limit)
+        ok = _print_prefix(args.prefix, args.limit)
         raise SystemExit(0 if ok else 1)
     else:
         preflight_spell()
-        ok = test_prefix("принтер", args.limit)
+        ok = _print_prefix("принтер", args.limit)
         raise SystemExit(0 if ok else 1)
 
 

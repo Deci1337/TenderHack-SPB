@@ -74,6 +74,7 @@ test('enrichAndFilterByDelivery keeps hint date and supplements origin from prod
 
   const result = await enrichAndFilterByDelivery(offers, {
     maxDeliveryDays: 10,
+    now: NOW,
     fetchDeliveryInfoImpl: async () => parseDeliveryText('Доставим 30 мая со склада в Красноярске', { now: NOW }),
   });
 
