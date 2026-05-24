@@ -6,7 +6,7 @@ import httpx
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', 'ml'))
 from suggestions import get_suggestions
 from web_agent import search_runet
-from spell_checker import correct
+from query_normalize import normalize_query
 from marketplace_parsers import search_wildberries as _py_wb, search_ozon as _py_ozon, search_yandex_market as _py_ym
 
 logger = logging.getLogger(__name__)
@@ -42,7 +42,7 @@ def suggest(q: str = "", limit: int = 7):
 def correct_query(q: str = ""):
     if not q.strip():
         return {"original": q, "corrected": q, "changed": False}
-    corrected = correct(q)
+    corrected = normalize_query(q)
     return {"original": q, "corrected": corrected, "changed": corrected != q}
 
 
@@ -52,7 +52,7 @@ async def search_runet_endpoint(q: str = "", region: str = "Москва"):
         return []
 
     # 1. Исправляем опечатки локально (symspellpy, без интернета)
-    corrected = correct(q)
+    corrected = normalize_query(q)
 
     # 2. LLM расширяет запрос (если модель скачана и USE_LLM=1)
     variants = [corrected]
@@ -160,7 +160,7 @@ async def _search_with_fallback(source: str, q: str, region: str, py_fn):
 async def search_wb(q: str = "", region: str = "Москва"):
     if not q.strip():
         return {"products": [], "liveHit": False}
-    corrected = correct(q)
+    corrected = normalize_query(q)
     return await _search_with_fallback("wildberries", corrected, region, _py_wb)
 
 
@@ -168,7 +168,7 @@ async def search_wb(q: str = "", region: str = "Москва"):
 async def search_ozon(q: str = "", region: str = "Москва"):
     if not q.strip():
         return {"products": [], "liveHit": False}
-    corrected = correct(q)
+    corrected = normalize_query(q)
     return await _search_with_fallback("ozon", corrected, region, _py_ozon)
 
 
@@ -176,7 +176,7 @@ async def search_ozon(q: str = "", region: str = "Москва"):
 async def search_ym(q: str = "", region: str = "Москва"):
     if not q.strip():
         return {"products": [], "liveHit": False}
-    corrected = correct(q)
+    corrected = normalize_query(q)
     return await _search_with_fallback("yandex_market", corrected, region, _py_ym)
 
 
