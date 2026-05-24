@@ -1,90 +1,154 @@
-import { ExternalLink } from 'lucide-react'
+// Figma: компонент 70:263 "Frame 64"
+// layout_A4VUNX: column, center, gap 14px, padding 30px 30px 23px, 297×465, fill #E7EEF7
 
-const SOURCE_STYLE = {
-  wildberries:   { label: 'WB',   bg: '#F5F3FF', color: '#6D28D9', border: '#DDD6FE' },
-  ozon:          { label: 'Ozon', bg: '#EFF6FF', color: '#1D4ED8', border: '#BFDBFE' },
-  yandex_market: { label: 'ЯМ',  bg: '#FFFBEB', color: '#92400E', border: '#FDE68A' },
-  runet:         { label: 'Сеть', bg: '#ECFDF5', color: '#065F46', border: '#A7F3D0' },
+const SOURCE_LABEL = {
+  wildberries:   'Wildberries',
+  ozon:          'Ozon',
+  yandex_market: 'Яндекс Маркет',
+  runet:         'Рунет',
 }
 
 export default function ProductCard({ product, onDetails }) {
-  const s = SOURCE_STYLE[product.source] || { label: '?', bg: '#F1F5F9', color: '#475569', border: '#CBD5E1' }
+  const label = SOURCE_LABEL[product.source] || product.source || ''
 
   return (
-    <article
+    // layout_A4VUNX: column, center, gap 14px, padding 30px 30px 23px, 297×465, fill #E7EEF7
+    <div
       onClick={onDetails}
       style={{
-        background: '#FFFFFF',
-        borderRadius: '14px',
-        border: '1.5px solid #F1F5F9',
-        overflow: 'hidden',
-        display: 'flex', flexDirection: 'column',
+        display: 'flex',
+        flexDirection: 'column',
+        alignItems: 'center',
+        gap: '14px',
+        padding: '30px 30px 23px',
+        width: '297px',
+        height: '465px',
+        background: '#E7EEF7',
+        boxSizing: 'border-box',
         cursor: 'pointer',
-        width: '100%',
-        transition: 'transform 0.18s, box-shadow 0.18s, border-color 0.18s',
-      }}
-      onMouseEnter={e => {
-        e.currentTarget.style.transform = 'translateY(-3px)'
-        e.currentTarget.style.boxShadow = '0 10px 28px rgba(11,22,40,0.12)'
-        e.currentTarget.style.borderColor = '#BFDBFE'
-      }}
-      onMouseLeave={e => {
-        e.currentTarget.style.transform = 'translateY(0)'
-        e.currentTarget.style.boxShadow = 'none'
-        e.currentTarget.style.borderColor = '#F1F5F9'
+        flexShrink: 0,
       }}
     >
-      {/* Картинка — фиксированный квадрат 1:1, contain на сером фоне */}
-      <div style={{ position: 'relative', background: '#F8FAFC', aspectRatio: '1/1', overflow: 'hidden' }}>
+      {/* Rectangle 1: layout_YDBYUY — 265×265, fill #FFFFFF */}
+      <div style={{
+        width: '265px',
+        height: '265px',
+        background: '#FFFFFF',
+        flexShrink: 0,
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'center',
+        overflow: 'hidden',
+      }}>
         <img
           src={product.image_url}
           alt={product.name}
           loading="lazy"
-          style={{ width: '100%', height: '100%', objectFit: 'contain', padding: '14px' }}
-          onError={e => { e.target.src = 'https://placehold.co/400x400/F1F5F9/94A3B8?text=Фото' }}
+          style={{ width: '100%', height: '100%', objectFit: 'contain' }}
+          onError={e => { e.target.src = 'https://placehold.co/265x265/FFFFFF/264B82?text=Фото' }}
         />
-        <span style={{
-          position: 'absolute', top: '10px', left: '10px',
-          padding: '4px 10px', borderRadius: '100px',
-          fontSize: '11px', fontWeight: 700,
-          background: s.bg, color: s.color, border: `1px solid ${s.border}`,
-        }}>
-          {s.label}
-        </span>
       </div>
 
-      {/* Контент */}
-      <div style={{ padding: '14px 14px 14px', flex: 1, display: 'flex', flexDirection: 'column', minHeight: '110px' }}>
-        <p style={{
-          fontSize: '13px', lineHeight: 1.35, color: '#334155',
-          fontWeight: 500, flex: 1, marginBottom: '10px',
-          display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical', overflow: 'hidden',
+      {/* Frame 68: layout_86OH0W — column, gap -4px, padding 0 0 10px, height 78 */}
+      <div style={{
+        display: 'flex',
+        flexDirection: 'column',
+        gap: '-4px',
+        paddingBottom: '10px',
+        height: '78px',
+        width: '100%',
+        flexShrink: 0,
+      }}>
+        {/* Frame 65: layout_5PE8TE — row, center, padding 6px, 266×45 */}
+        <div style={{
+          display: 'flex',
+          flexDirection: 'row',
+          alignItems: 'center',
+          padding: '6px',
+          width: '266px',
+          height: '45px',
+          boxSizing: 'border-box',
+          flexShrink: 0,
         }}>
-          {product.name}
-        </p>
-        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '8px' }}>
-          <p style={{ fontSize: '19px', fontWeight: 800, color: '#0F172A', letterSpacing: '-0.02em' }}>
-            {product.price.toLocaleString('ru-RU')}
-            <span style={{ fontSize: '13px', color: '#94A3B8', fontWeight: 500, marginLeft: '3px' }}>₽</span>
-          </p>
-          <a
-            href={product.source_url}
-            target="_blank"
-            rel="noreferrer"
-            onClick={e => e.stopPropagation()}
-            aria-label="Открыть источник"
-            style={{
-              width: '30px', height: '30px', borderRadius: '8px',
-              border: '1px solid #E2E8F0', display: 'flex', alignItems: 'center', justifyContent: 'center',
-              color: '#94A3B8', textDecoration: 'none', transition: 'all 0.15s', flexShrink: 0,
-            }}
-            onMouseEnter={e => { e.currentTarget.style.borderColor = '#1D6ECA'; e.currentTarget.style.color = '#1D6ECA' }}
-            onMouseLeave={e => { e.currentTarget.style.borderColor = '#E2E8F0'; e.currentTarget.style.color = '#94A3B8' }}
-          >
-            <ExternalLink size={14} strokeWidth={2} />
-          </a>
+          {/* price: style_EPM1Y3 — Open Sans Regular 400 29px, letterSpacing 3%, #1A1A1A */}
+          <span style={{
+            fontFamily: "'Open Sans', sans-serif",
+            fontWeight: 400,
+            fontSize: '29px',
+            letterSpacing: '3%',
+            color: '#1A1A1A',
+            flex: 1,
+          }}>
+            {product.price ? product.price.toLocaleString('ru-RU') + ' р.' : '—'}
+          </span>
+          {/* Frame badge: layout_T16B5J — 35×32, transparent */}
+          <div style={{ width: '35px', height: '32px', flexShrink: 0 }} />
+        </div>
+
+        {/* Frame 67: layout_PXUXIC — column, center, gap 20px, 266×37 */}
+        <div style={{
+          display: 'flex',
+          flexDirection: 'column',
+          alignItems: 'center',
+          gap: '20px',
+          width: '266px',
+          height: '37px',
+          flexShrink: 0,
+          overflow: 'hidden',
+        }}>
+          {/* product title: style_56AEN2 — Open Sans Regular 400 20px #575757, 254×33 */}
+          <span style={{
+            fontFamily: "'Open Sans', sans-serif",
+            fontWeight: 400,
+            fontSize: '20px',
+            color: '#575757',
+            width: '254px',
+            height: '33px',
+            overflow: 'hidden',
+            whiteSpace: 'nowrap',
+            textOverflow: 'ellipsis',
+            display: 'block',
+          }}>
+            {product.name}
+          </span>
         </div>
       </div>
-    </article>
+
+      {/* Frame 69 "Подробнее": layout_AWSKUQ — column, center, padding 10px, 266×41, fill #FFFFFF */}
+      <a
+        href={product.source_url}
+        target="_blank"
+        rel="noreferrer"
+        onClick={e => e.stopPropagation()}
+        style={{
+          display: 'flex',
+          flexDirection: 'column',
+          justifyContent: 'center',
+          alignItems: 'center',
+          padding: '10px',
+          width: '266px',
+          height: '41px',
+          background: '#FFFFFF',
+          boxSizing: 'border-box',
+          textDecoration: 'none',
+          flexShrink: 0,
+        }}
+      >
+        {/* "Подробнее": style_CR11GD — SemiBold 600 25px #264B82, 144×37 */}
+        <span style={{
+          fontFamily: "'Open Sans', sans-serif",
+          fontWeight: 600,
+          fontSize: '25px',
+          color: '#264B82',
+          width: '144px',
+          height: '37px',
+          textAlign: 'center',
+          lineHeight: '37px',
+          whiteSpace: 'nowrap',
+        }}>
+          Подробнее
+        </span>
+      </a>
+    </div>
   )
 }

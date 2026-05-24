@@ -1,307 +1,510 @@
+// Figma screen 82:1299 (79:701) — pixel-perfect
+// Root: 1440×900, bg #FEFEFF, column, alignItems center, padding 38px 80px
+// Search section (80:1166): column, gap 24px, padding 32px, height 311
+//   shadow: 0px 4px 24px 0px rgba(38,75,130,1), radius 20px
+// Title: Bold 700 40px #264B82
+// Frame 107 (T6RJB2): column, gap 24px, 1143×135
+//   Frame 102 (SE6WC3): column, alignSelf stretch, gap 12px
+//     Frame 98 (1BKR3V): row, center, fill, padding 8px, gap 12px, bg #E7EEF7
+//       Icon 30×30, input SemiBold 600 24px #264B82
+//     Frame 101 (7LTOK6): row, center, fill, padding 8px 0px, gap 12px
+//       Frame 100 (W74ZK9): row, center, fill, padding 10px, gap 16px, border 1px #264B82, radius 12
+//         Icon 30×30, text SemiBold 600 24px #264B82
+//       Frame 101 (W74ZK9): row, center, fill, padding 10px, gap 16px, border 1px #264B82, radius 12
+//         Icon 30×30, "Цена от" SemiBold 600 24px #264B82
+//         Frame 103 (YK1LO8): column center+stretch, gap 10px, padding 0 29px, 100×34, border 1px #264B82, radius 12
+//           "900" Regular 400 24px #1A1A1A
+//         "до" SemiBold 600 24px #264B82
+//         Frame 104: same as 103
+// Frame 125 (KIQ4AB): column, center, 1144, hug
+//   "Источники:" SemiBold 600 32px #264B82, 189×35
+//   Frame 105 (P6UPXS): row, center, gap 24px, padding 32px 0px, 1144×112
+//     Chip wrapper (UAV4D4/S9P9XD): column, center+stretch, gap 8px, padding 22px 5px, 268/266×99
+//       Frame 109 (3C9WOT): column, center, fill, gap 10px, padding 30px 10px, h64, radius 12
+//         text (7YOIDW): SemiBold 600 24px, width 183, selected:#FFF / unselected:#264B82
+
 import { useState, useRef, useEffect } from 'react'
 import { useNavigate, useSearchParams } from 'react-router-dom'
-import { Search, MapPin, ArrowRight, SlidersHorizontal } from 'lucide-react'
 import { fetchSuggestions } from '../api/suggest'
 
-const REGIONS = [
-  'Москва', 'Санкт-Петербург', 'Новосибирск', 'Екатеринбург',
-  'Казань', 'Нижний Новгород', 'Челябинск', 'Самара', 'Омск', 'Ростов-на-Дону',
-]
+// Figma node I82:1300;80:1147 — search icon 30×30, fill_FNKPM0 (transparent stroke #264B82)
+function IconSearch() {
+  return (
+    <svg width="30" height="30" viewBox="0 0 30 30" fill="none" style={{flexShrink:0}}>
+      <circle cx="13.75" cy="13.75" r="10" stroke="#264B82" strokeWidth="2"/>
+      <path d="M21.25 21.25L26.25 26.25" stroke="#264B82" strokeWidth="2" strokeLinecap="round"/>
+    </svg>
+  )
+}
 
-const EXAMPLES = [
-  'Шина летняя 205/55 R16',
-  'Принтер лазерный А4',
-  'Куртка мужская зимняя',
-]
+// Figma node I82:1300;80:1153 — location icon 30×30
+function IconLocation() {
+  return (
+    <svg width="30" height="30" viewBox="0 0 30 30" fill="none" style={{flexShrink:0}}>
+      <path d="M5.04625 5.85987C4.99691 5.74602 4.98295 5.61996 5.00617 5.49807C5.02939 5.37618 5.08873 5.26409 5.17647 5.17635C5.26421 5.0886 5.3763 5.02927 5.49819 5.00605C5.62008 4.98283 5.74614 4.99679 5.86 5.04612L25.86 13.1711C25.9816 13.2207 26.0845 13.3073 26.1541 13.4186C26.2237 13.5299 26.2565 13.6604 26.2478 13.7914C26.2391 13.9224 26.1893 14.0474 26.1056 14.1485C26.0218 14.2497 25.9083 14.3219 25.7812 14.3549L18.1262 16.3299C17.6937 16.4411 17.2989 16.6661 16.9828 16.9815C16.6667 17.297 16.4408 17.6913 16.3287 18.1236L14.355 25.7811C14.322 25.9082 14.2498 26.0217 14.1487 26.1055C14.0475 26.1892 13.9226 26.239 13.7915 26.2477C13.6605 26.2564 13.5301 26.2236 13.4187 26.154C13.3074 26.0844 13.2208 25.9815 13.1712 25.8599L5.04625 5.85987Z" stroke="#264B82" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/>
+    </svg>
+  )
+}
 
-const SOURCES = [
-  { name: 'Wildberries', color: '#7C3AED' },
-  { name: 'Ozon',        color: '#2563EB' },
-  { name: 'Яндекс Маркет', color: '#D97706' },
-  { name: 'Рунет',       color: '#059669' },
+// Figma node I82:1300;80:1157 — price icon 30×30
+function IconPrice() {
+  return (
+    <svg width="30" height="30" viewBox="0 0 30 30" fill="none" style={{flexShrink:0}}>
+      <path d="M10 26.25H12.5V21.25H20V18.75H12.5V16.25H18.75C22.2 16.25 25 13.45 25 10C25 6.55 22.2 3.75 18.75 3.75H11.25C10.5625 3.75 10 4.3125 10 5V13.75H5V16.25H10V18.75H5V21.25H10V26.25ZM12.5 6.25H18.75C20.8125 6.25 22.5 7.9375 22.5 10C22.5 12.0625 20.8125 13.75 18.75 13.75H12.5V6.25Z" fill="#264B82"/>
+    </svg>
+  )
+}
+
+const REGIONS = ['Москва', 'Казань', 'Санкт-Петербург', 'Екатеринбург', 'Новосибирск', 'Нижний Новгород', 'Челябинск', 'Самара', 'Омск', 'Ростов-на-Дону']
+
+const CHIPS = [
+  { label: 'Яндекс Маркет', w: 268 },
+  { label: 'Wildberries',   w: 266 },
+  { label: 'Ozon',          w: 266 },
+  { label: 'Другое',        w: 268 },
 ]
 
 export default function SearchPage() {
   const [searchParams] = useSearchParams()
-  const [query, setQuery]         = useState(searchParams.get('q') || '')
-  const [region, setRegion]       = useState('Москва')
+  const [query, setQuery]       = useState(searchParams.get('q') || '')
+  const [region, setRegion]     = useState('Москва')
+  const [showRegion, setShowRegion] = useState(false)
   const [priceFrom, setPriceFrom] = useState('')
   const [priceTo, setPriceTo]     = useState('')
-  const [dateTo, setDateTo]       = useState('')
-  const [hints, setHints]         = useState([])
+  // Figma: Яндекс Маркет и Ozon выбраны (fill #264B82), Wildberries — нет (fill #E7EEF7)
+  const [sources, setSources] = useState(['Яндекс Маркет', 'Ozon', 'Другое'])
+  const [hints, setHints]     = useState([])
   const [showHints, setShowHints] = useState(false)
-  const inputRef  = useRef(null)
+  const regionRef = useRef(null)
   const navigate  = useNavigate()
 
   useEffect(() => {
-    let cancelled = false
-    fetchSuggestions(query, 7).then(results => {
-      if (!cancelled) setHints(results)
-    })
-    return () => { cancelled = true }
+    let cancel = false
+    if (query.trim()) fetchSuggestions(query, 7).then(r => { if (!cancel) setHints(r) })
+    else setHints([])
+    return () => { cancel = true }
   }, [query])
+
+  useEffect(() => {
+    const h = e => { if (regionRef.current && !regionRef.current.contains(e.target)) setShowRegion(false) }
+    document.addEventListener('mousedown', h)
+    return () => document.removeEventListener('mousedown', h)
+  }, [])
 
   const go = (q = query) => {
     if (!q.trim()) return
-    const params = new URLSearchParams({ q, region })
-    if (priceFrom) params.set('priceFrom', priceFrom)
-    if (priceTo)   params.set('priceTo', priceTo)
-    if (dateTo)    params.set('dateTo', dateTo)
-    navigate(`/results?${params.toString()}`)
+    const p = new URLSearchParams({ q, region })
+    if (priceFrom) p.set('priceFrom', priceFrom)
+    if (priceTo)   p.set('priceTo', priceTo)
+    navigate(`/results?${p}`)
   }
 
-  const pick = (hint) => { setQuery(hint); setShowHints(false); go(hint) }
+  const toggleSrc = s => setSources(prev => prev.includes(s) ? prev.filter(x => x !== s) : [...prev, s])
 
+  // layout_NZBFLS: column, alignItems center, padding 38px 80px, 1440×900, bg #FEFEFF
   return (
-    <div style={{ minHeight: '100vh', display: 'flex', flexDirection: 'column' }}>
+    <div style={{
+      minHeight: '100vh',
+      background: '#FEFEFF',
+      fontFamily: "'Open Sans', sans-serif",
+      display: 'flex',
+      flexDirection: 'column',
+      alignItems: 'center',
+      padding: '38px 80px',
+      boxSizing: 'border-box',
+    }}>
 
-      {/* ─── Hero (тёмный верх) ─── */}
+      {/* Search section (80:1166 instance):
+          layout_XRXXP7: column, gap 24px, padding 32px, height 311, hug horizontal
+          effect_RLE9OJ: box-shadow 0px 4px 24px 0px rgba(38,75,130,1)
+          borderRadius: 20px */}
       <div style={{
-        background: 'linear-gradient(160deg, #0B1628 0%, #162850 100%)',
-        padding: '64px 24px 80px',
-        textAlign: 'center',
-        position: 'relative',
-        overflow: 'hidden',
+        width: '100%',
+        maxWidth: '1280px',
+        borderRadius: '20px',
+        boxShadow: '0px 4px 24px 0px rgba(38, 75, 130, 1)',
+        padding: '32px',
+        display: 'flex',
+        flexDirection: 'column',
+        gap: '24px',
+        boxSizing: 'border-box',
       }}>
-        {/* Декоративные кольца */}
-        <div style={{
-          position: 'absolute', top: '-60px', right: '-60px',
-          width: '300px', height: '300px', borderRadius: '50%',
-          border: '1px solid rgba(255,255,255,0.04)',
-        }} />
-        <div style={{
-          position: 'absolute', top: '-30px', right: '-30px',
-          width: '200px', height: '200px', borderRadius: '50%',
-          border: '1px solid rgba(255,255,255,0.06)',
-        }} />
-        <div style={{
-          position: 'absolute', bottom: '-80px', left: '-40px',
-          width: '250px', height: '250px', borderRadius: '50%',
-          border: '1px solid rgba(255,255,255,0.04)',
-        }} />
 
-        {/* Бейдж */}
-        <div style={{
-          display: 'inline-flex', alignItems: 'center', gap: '8px',
-          background: 'rgba(29,110,202,0.25)',
-          border: '1px solid rgba(59,130,246,0.3)',
-          borderRadius: '100px', padding: '6px 16px',
-          marginBottom: '28px',
+        {/* style_E1A8Z1: Bold 700 40px, fill_XAPH4O = #264B82 */}
+        <span style={{
+          fontFamily: "'Open Sans', sans-serif",
+          fontWeight: 700,
+          fontSize: '40px',
+          color: '#264B82',
+          lineHeight: '1.3',
+          display: 'block',
         }}>
-          <div style={{ width: '6px', height: '6px', borderRadius: '50%', background: '#3B82F6' }} />
-          <span style={{ color: '#93C5FD', fontSize: '13px', fontWeight: 600, letterSpacing: '0.05em' }}>
-            ПОРТАЛ ПОСТАВЩИКОВ · НМЦК
-          </span>
-        </div>
+          Найдите нужные товары в открытых источниках
+        </span>
 
-        <h1 style={{
-          fontSize: 'clamp(2.5rem, 6vw, 4rem)',
-          fontWeight: 800,
-          color: '#FFFFFF',
-          letterSpacing: '-0.03em',
-          lineHeight: 1.05,
-          marginBottom: '16px',
-        }}>
-          Price<span style={{ color: '#3B82F6' }}>Hunter</span>
-        </h1>
-
-        <p style={{
-          fontSize: '1.125rem',
-          color: 'rgba(255,255,255,0.55)',
-          maxWidth: '480px',
-          margin: '0 auto 40px',
-          lineHeight: 1.6,
-        }}>
-          Сравните цены с&nbsp;4&nbsp;источников за&nbsp;30&nbsp;секунд
-          и&nbsp;обоснуйте НМЦК по&nbsp;44-ФЗ
-        </p>
-
-        {/* Источники */}
-        <div style={{ display: 'flex', justifyContent: 'center', gap: '24px', flexWrap: 'wrap' }}>
-          {SOURCES.map(s => (
-            <div key={s.name} style={{ display: 'flex', alignItems: 'center', gap: '7px' }}>
-              <div style={{ width: '8px', height: '8px', borderRadius: '50%', background: s.color }} />
-              <span style={{ color: 'rgba(255,255,255,0.45)', fontSize: '13px', fontWeight: 500 }}>{s.name}</span>
-            </div>
-          ))}
-        </div>
-      </div>
-
-      {/* ─── Карточка поиска (перекрывает hero снизу) ─── */}
-      <div style={{
-        maxWidth: '680px', width: '100%', margin: '-40px auto 0',
-        padding: '0 16px',
-        position: 'relative', zIndex: 10,
-      }}>
+        {/* Frame 107 (layout_T6RJB2): column, gap 24px, 1143×135 */}
         <div style={{
-          background: '#FFFFFF',
-          borderRadius: '20px',
-          boxShadow: '0 20px 60px rgba(11,22,40,0.18), 0 4px 16px rgba(11,22,40,0.08)',
-          padding: '28px',
+          display: 'flex',
+          flexDirection: 'column',
+          gap: '24px',
+          width: '100%',
         }}>
 
-          {/* Регион */}
+          {/* Frame 102 (layout_SE6WC3): column, alignSelf stretch, gap 12px */}
           <div style={{
-            display: 'flex', alignItems: 'center', gap: '8px',
-            marginBottom: '14px',
-            padding: '10px 14px',
-            background: '#F8FAFC',
-            borderRadius: '10px',
-            border: '1px solid #E2E8F0',
+            display: 'flex',
+            flexDirection: 'column',
+            gap: '12px',
+            width: '100%',
           }}>
-            <MapPin size={15} color="#1D6ECA" strokeWidth={2.5} />
-            <span style={{ fontSize: '13px', color: '#64748B', fontWeight: 500 }}>Регион:</span>
-            <select
-              value={region}
-              onChange={e => setRegion(e.target.value)}
-              style={{
-                border: 'none', background: 'transparent',
-                fontSize: '13px', fontWeight: 700, color: '#0F172A',
-                cursor: 'pointer', outline: 'none',
-              }}
-            >
-              {REGIONS.map(r => <option key={r} value={r}>{r}</option>)}
-            </select>
-          </div>
 
-          {/* Фильтр: цена */}
-          <div style={{ marginBottom: '14px' }}>
-            <div style={{ display: 'flex', alignItems: 'center', gap: '6px', padding: '10px 14px', background: '#F8FAFC', borderRadius: '10px', border: '1px solid #E2E8F0' }}>
-              <SlidersHorizontal size={14} color="#1D6ECA" strokeWidth={2.5} />
+            {/* Frame 98 (layout_1BKR3V): row, center, fill, padding 8px, gap 12px, fill #E7EEF7 */}
+            <div style={{
+              display: 'flex',
+              flexDirection: 'row',
+              alignItems: 'center',
+              gap: '12px',
+              padding: '8px',
+              background: '#E7EEF7',
+              width: '100%',
+              boxSizing: 'border-box',
+              position: 'relative',
+            }}>
+              {/* layout_5R17N4: 30×30 */}
+              <IconSearch />
+
+              {/* style_18LWOF: SemiBold 600 24px, fill_XAPH4O = #264B82 */}
               <input
-                type="number"
-                placeholder="от ₽"
-                value={priceFrom}
-                onChange={e => setPriceFrom(e.target.value)}
-                style={{ border: 'none', background: 'transparent', width: '80px', fontSize: '13px', fontFamily: 'inherit', color: '#0F172A', outline: 'none' }}
+                type="text"
+                value={query}
+                onChange={e => setQuery(e.target.value)}
+                onFocus={() => setShowHints(true)}
+                onBlur={() => setTimeout(() => setShowHints(false), 150)}
+                onKeyDown={e => e.key === 'Enter' && go()}
+                placeholder="Поиск"
+                style={{
+                  flex: 1,
+                  border: 'none',
+                  background: 'transparent',
+                  fontFamily: "'Open Sans', sans-serif",
+                  fontWeight: 600,
+                  fontSize: '24px',
+                  color: '#264B82',
+                  outline: 'none',
+                  minWidth: 0,
+                }}
               />
-              <span style={{ color: '#CBD5E1', fontSize: '12px' }}>—</span>
-              <input
-                type="number"
-                placeholder="до ₽"
-                value={priceTo}
-                onChange={e => setPriceTo(e.target.value)}
-                style={{ border: 'none', background: 'transparent', width: '80px', fontSize: '13px', fontFamily: 'inherit', color: '#0F172A', outline: 'none' }}
-              />
+
+              {/* Кнопка поиска — Enter иконка справа в поле */}
+              <button
+                onClick={() => go()}
+                style={{
+                  background: '#264B82',
+                  border: 'none',
+                  borderRadius: '8px',
+                  padding: '6px 20px',
+                  color: '#FFFFFF',
+                  fontFamily: "'Open Sans', sans-serif",
+                  fontWeight: 600,
+                  fontSize: '20px',
+                  cursor: 'pointer',
+                  flexShrink: 0,
+                  height: '40px',
+                  display: 'flex',
+                  alignItems: 'center',
+                }}
+                onMouseEnter={e => e.currentTarget.style.opacity='0.85'}
+                onMouseLeave={e => e.currentTarget.style.opacity='1'}
+              >
+                Найти
+              </button>
+
+              {/* Autocomplete dropdown */}
+              {showHints && hints.length > 0 && (
+                <ul style={{
+                  position: 'absolute', top: 'calc(100% + 4px)', left: 0, right: 0,
+                  background: '#FFFFFF',
+                  border: '1px solid #D4DBE6',
+                  borderRadius: '12px',
+                  boxShadow: '10px 10px 5.3px 0px rgba(0,0,0,0.25)',
+                  zIndex: 100, overflow: 'hidden', listStyle: 'none', margin: 0, padding: 0,
+                }}>
+                  {hints.map((group, gi) => (
+                    <li key={group.category}>
+                      {gi > 0 && <div style={{height:'1px',background:'#D4DBE6'}}/>}
+                      {group.items.map((item, ii) => (
+                        <div
+                          key={ii}
+                          onMouseDown={() => { setQuery(item); setShowHints(false); go(item) }}
+                          style={{
+                            padding: '10px 20px',
+                            fontFamily: "'Open Sans', sans-serif",
+                            fontWeight: 400, fontSize: '20px', color: '#264B82',
+                            cursor: 'pointer',
+                            borderBottom: ii < group.items.length-1 ? '1px solid #D4DBE6' : 'none',
+                          }}
+                          onMouseEnter={e => e.currentTarget.style.background='#E7EEF7'}
+                          onMouseLeave={e => e.currentTarget.style.background='transparent'}
+                        >
+                          {item}
+                        </div>
+                      ))}
+                    </li>
+                  ))}
+                </ul>
+              )}
             </div>
-          </div>
 
-          {/* Срок поставки — до выбранной даты */}
-          <div style={{ display: 'flex', alignItems: 'center', gap: '8px', padding: '10px 14px', background: '#F8FAFC', borderRadius: '10px', border: '1px solid #E2E8F0', marginBottom: '14px' }}>
-            <span style={{ fontSize: '13px', color: '#64748B', fontWeight: 500, whiteSpace: 'nowrap' }}>Поставка до:</span>
-            <input
-              type="date"
-              value={dateTo}
-              min={new Date().toISOString().slice(0, 10)}
-              onChange={e => setDateTo(e.target.value)}
-              style={{ border: 'none', background: 'transparent', fontSize: '13px', fontFamily: 'inherit', color: '#0F172A', outline: 'none', cursor: 'pointer' }}
-            />
-          </div>
+            {/* Frame 101 (layout_7LTOK6): row, center, fill, padding 8px 0px, gap 12px */}
+            <div style={{
+              display: 'flex',
+              flexDirection: 'row',
+              alignItems: 'center',
+              gap: '12px',
+              padding: '8px 0px',
+              width: '100%',
+              boxSizing: 'border-box',
+            }}>
 
-          {/* Поле поиска */}
-          <div style={{ position: 'relative' }}>
-            <input
-              ref={inputRef}
-              type="text"
-              value={query}
-              onChange={e => setQuery(e.target.value)}
-              onFocus={() => setShowHints(true)}
-              onBlur={() => setTimeout(() => setShowHints(false), 150)}
-              onKeyDown={e => e.key === 'Enter' && go()}
-              placeholder="Например: принтер лазерный А4"
-              style={{
-                width: '100%',
-                padding: '16px 20px',
-                fontSize: '16px',
-                fontFamily: 'inherit',
-                color: '#0F172A',
-                background: '#F8FAFC',
-                border: '2px solid #E2E8F0',
-                borderRadius: '12px',
-                outline: 'none',
-                transition: 'border-color 0.15s',
-              }}
-              onFocusCapture={e => e.target.style.borderColor = '#1D6ECA'}
-              onBlurCapture={e => e.target.style.borderColor = '#E2E8F0'}
-            />
-
-            {/* Подсказки */}
-            {showHints && hints.length > 0 && (
-              <ul style={{
-                position: 'absolute', top: 'calc(100% + 8px)', left: 0, right: 0,
-                background: '#FFFFFF',
-                border: '1px solid #E2E8F0',
-                borderRadius: '14px',
-                boxShadow: '0 12px 40px rgba(11,22,40,0.12)',
-                zIndex: 50, overflow: 'hidden', listStyle: 'none',
-              }}>
-                {hints.map((group, gi) => (
-                  <li key={group.category}>
-                    <div style={{
-                      padding: '7px 18px 4px',
-                      fontSize: '10px', fontWeight: 700, letterSpacing: '0.07em',
-                      color: '#94A3B8', textTransform: 'uppercase',
-                      background: gi > 0 ? '#F8FAFC' : '#FFFFFF',
-                      borderTop: gi > 0 ? '1px solid #F1F5F9' : 'none',
-                    }}>
-                      {group.category}
-                    </div>
-                    {group.items.map((item, ii) => (
+              {/* Frame 100 (layout_W74ZK9): row, center, fill, padding 10px, gap 16px
+                  strokes fill_XAPH4O = #264B82, 1px, radius 12px */}
+              <div ref={regionRef} style={{position:'relative', flex:1}}>
+                <div
+                  onClick={() => setShowRegion(v => !v)}
+                  style={{
+                    display: 'flex',
+                    flexDirection: 'row',
+                    alignItems: 'center',
+                    gap: '16px',
+                    padding: '10px',
+                    border: '1px solid #264B82',
+                    borderRadius: '12px',
+                    cursor: 'pointer',
+                    boxSizing: 'border-box',
+                    width: '100%',
+                  }}
+                  onMouseEnter={e => e.currentTarget.style.background='rgba(38,75,130,0.05)'}
+                  onMouseLeave={e => e.currentTarget.style.background='transparent'}
+                >
+                  <IconLocation />
+                  <span style={{
+                    fontFamily: "'Open Sans', sans-serif",
+                    fontWeight: 600, fontSize: '24px', color: '#264B82', flex: 1,
+                  }}>
+                    {region || 'Введите регион'}
+                  </span>
+                </div>
+                {showRegion && (
+                  <div style={{
+                    position: 'absolute', top: 'calc(100% + 4px)', left: 0,
+                    minWidth: '100%',
+                    background: '#FFFFFF',
+                    borderRadius: '12px',
+                    border: '1px solid #D4DBE6',
+                    boxShadow: '10px 10px 5.3px 0px rgba(0,0,0,0.25)',
+                    zIndex: 100, overflow: 'hidden',
+                  }}>
+                    {REGIONS.map((r, i) => (
                       <div
-                        key={ii}
-                        onMouseDown={() => pick(item)}
+                        key={r}
+                        onMouseDown={() => { setRegion(r); setShowRegion(false) }}
                         style={{
-                          display: 'flex', alignItems: 'center', gap: '12px',
-                          padding: '10px 18px',
+                          padding: '10px 20px',
+                          fontFamily: "'Open Sans', sans-serif",
+                          fontWeight: 400, fontSize: '20px', color: '#264B82',
                           cursor: 'pointer',
-                          fontSize: '14px', color: '#334155',
-                          borderBottom: ii < group.items.length - 1 ? '1px solid #F8FAFC' : 'none',
-                          transition: 'background 0.1s',
+                          borderBottom: i < REGIONS.length-1 ? '1px solid #D4DBE6' : 'none',
+                          background: r===region ? '#E7EEF7' : '#FFFFFF',
                         }}
-                        onMouseEnter={e => e.currentTarget.style.background = '#F0F9FF'}
-                        onMouseLeave={e => e.currentTarget.style.background = 'transparent'}
+                        onMouseEnter={e => e.currentTarget.style.background='#E7EEF7'}
+                        onMouseLeave={e => e.currentTarget.style.background=r===region?'#E7EEF7':'#FFFFFF'}
                       >
-                        <Search size={13} color="#CBD5E1" strokeWidth={2} />
-                        {item}
+                        {r}
                       </div>
                     ))}
-                  </li>
-                ))}
-              </ul>
-            )}
-          </div>
+                  </div>
+                )}
+              </div>
 
-          {/* Кнопка */}
-          <button
-            onClick={() => go()}
-            style={{
-              marginTop: '12px',
-              width: '100%',
-              padding: '16px',
-              background: 'linear-gradient(135deg, #1D6ECA 0%, #2563EB 100%)',
-              color: '#FFFFFF',
-              fontSize: '16px',
-              fontWeight: 700,
-              fontFamily: 'inherit',
-              border: 'none',
-              borderRadius: '12px',
-              cursor: 'pointer',
-              display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '8px',
-              boxShadow: '0 8px 24px rgba(29,110,202,0.35)',
-              transition: 'transform 0.1s, box-shadow 0.1s',
-            }}
-            onMouseEnter={e => { e.currentTarget.style.transform = 'translateY(-1px)'; e.currentTarget.style.boxShadow = '0 12px 32px rgba(29,110,202,0.45)' }}
-            onMouseLeave={e => { e.currentTarget.style.transform = 'translateY(0)'; e.currentTarget.style.boxShadow = '0 8px 24px rgba(29,110,202,0.35)' }}
-            onMouseDown={e => e.currentTarget.style.transform = 'translateY(0)'}
-          >
-            <Search size={18} strokeWidth={2.5} />
-            Найти цены
-            <ArrowRight size={18} strokeWidth={2.5} />
-          </button>
+              {/* Frame 101/price (layout_W74ZK9): row, center, fill, padding 10px, gap 16px
+                  strokes #264B82 1px, radius 12px */}
+              <div style={{
+                display: 'flex',
+                flexDirection: 'row',
+                alignItems: 'center',
+                gap: '16px',
+                padding: '10px',
+                border: '1px solid #264B82',
+                borderRadius: '12px',
+                flex: 1,
+                boxSizing: 'border-box',
+              }}>
+                <IconPrice />
+                {/* "Цена от": style_18LWOF SemiBold 600 24px #264B82 */}
+                <span style={{
+                  fontFamily: "'Open Sans', sans-serif",
+                  fontWeight: 600, fontSize: '24px', color: '#264B82',
+                  whiteSpace: 'nowrap', flexShrink: 0,
+                }}>
+                  Цена от
+                </span>
+                {/* Frame 103 (layout_YK1LO8): column center+stretch, padding 0 29px, 100×34, border #264B82 1px, radius 12 */}
+                <input
+                  type="number"
+                  value={priceFrom}
+                  onChange={e => setPriceFrom(e.target.value)}
+                  placeholder="900"
+                  style={{
+                    width: '100px', height: '34px',
+                    padding: '0 29px',
+                    borderRadius: '12px',
+                    border: '1px solid #264B82',
+                    background: 'transparent',
+                    fontFamily: "'Open Sans', sans-serif",
+                    fontWeight: 400, fontSize: '24px', color: '#1A1A1A',
+                    outline: 'none',
+                    boxSizing: 'border-box',
+                    flexShrink: 0,
+                    textAlign: 'center',
+                  }}
+                />
+                {/* "до": style_18LWOF */}
+                <span style={{
+                  fontFamily: "'Open Sans', sans-serif",
+                  fontWeight: 600, fontSize: '24px', color: '#264B82',
+                  whiteSpace: 'nowrap', flexShrink: 0,
+                }}>
+                  до
+                </span>
+                {/* Frame 104 (layout_YK1LO8) */}
+                <input
+                  type="number"
+                  value={priceTo}
+                  onChange={e => setPriceTo(e.target.value)}
+                  placeholder="10000"
+                  style={{
+                    width: '100px', height: '34px',
+                    padding: '0 29px',
+                    borderRadius: '12px',
+                    border: '1px solid #264B82',
+                    background: 'transparent',
+                    fontFamily: "'Open Sans', sans-serif",
+                    fontWeight: 400, fontSize: '24px', color: '#1A1A1A',
+                    outline: 'none',
+                    boxSizing: 'border-box',
+                    flexShrink: 0,
+                    textAlign: 'center',
+                  }}
+                />
+              </div>
+            </div>
+          </div>
+        </div>
+
+        {/* Frame 125 (layout_KIQ4AB): column, center, width 1144, hug */}
+        <div style={{
+          display: 'flex',
+          flexDirection: 'column',
+          justifyContent: 'center',
+          width: '100%',
+        }}>
+          {/* "Источники:" style_HCR1NS: SemiBold 600 32px #264B82, 189×35 */}
+          <span style={{
+            fontFamily: "'Open Sans', sans-serif",
+            fontWeight: 600, fontSize: '32px', color: '#264B82',
+            display: 'block',
+            width: '189px',
+            height: '35px',
+            lineHeight: '35px',
+            flexShrink: 0,
+          }}>
+            Источники:
+          </span>
+
+          {/* Frame 105 (layout_P6UPXS): row, center, gap 24px, padding 32px 0px, height 112 */}
+          <div style={{
+            display: 'flex',
+            flexDirection: 'row',
+            alignItems: 'center',
+            gap: '24px',
+            padding: '32px 0px',
+            height: '112px',
+            boxSizing: 'border-box',
+          }}>
+            {CHIPS.map(({ label, w }) => {
+              const active = sources.includes(label)
+              return (
+                /* Chip wrapper (UAV4D4 for 268w, S9P9XD for 266w):
+                   column, center+stretch, gap 8px, padding 22px 5px, h99, radius 12 */
+                <div
+                  key={label}
+                  onClick={() => toggleSrc(label)}
+                  style={{
+                    display: 'flex',
+                    flexDirection: 'column',
+                    justifyContent: 'center',
+                    alignItems: 'stretch',
+                    gap: '8px',
+                    padding: '22px 5px',
+                    width: `${w}px`,
+                    height: '99px',
+                    boxSizing: 'border-box',
+                    borderRadius: '12px',
+                    cursor: 'pointer',
+                    flexShrink: 0,
+                  }}
+                >
+                  {/* Frame 109 (layout_3C9WOT): column, center, fill, gap 10px, padding 10px 30px, h64, radius 12
+                      selected: fill #264B82 / unselected: fill #E7EEF7 + stroke #264B82 1px */}
+                  <div
+                    style={{
+                      display: 'flex',
+                      flexDirection: 'column',
+                      justifyContent: 'center',
+                      alignItems: 'center',
+                      gap: '10px',
+                      padding: '10px 30px',
+                      height: '64px',
+                      borderRadius: '12px',
+                      boxSizing: 'border-box',
+                      background: active ? '#264B82' : '#E7EEF7',
+                      border: active ? 'none' : '1px solid #264B82',
+                      transition: 'background 0.15s, border-color 0.15s',
+                    }}
+                    onMouseEnter={e => {
+                      if (!active) e.currentTarget.style.background = 'rgba(38,75,130,0.15)'
+                    }}
+                    onMouseLeave={e => {
+                      if (!active) e.currentTarget.style.background = '#E7EEF7'
+                    }}
+                    onMouseDown={e => {
+                      e.currentTarget.style.opacity = '0.8'
+                    }}
+                    onMouseUp={e => {
+                      e.currentTarget.style.opacity = '1'
+                    }}
+                  >
+                    {/* layout_7YOIDW: width 183, style_18LWOF SemiBold 600 24px
+                        selected: fill #FFFFFF / unselected: fill #264B82 */}
+                    <span style={{
+                      fontFamily: "'Open Sans', sans-serif",
+                      fontWeight: 600, fontSize: '24px',
+                      color: active ? '#FFFFFF' : '#264B82',
+                      width: '183px',
+                      textAlign: 'center',
+                      whiteSpace: 'nowrap',
+                      overflow: 'hidden',
+                      textOverflow: 'ellipsis',
+                    }}>
+                      {label}
+                    </span>
+                  </div>
+                </div>
+              )
+            })}
+          </div>
         </div>
       </div>
-
-
     </div>
   )
 }

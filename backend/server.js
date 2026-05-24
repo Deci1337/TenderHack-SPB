@@ -104,7 +104,7 @@ const server = http.createServer(async (req, res) => {
       limit: 40,
       city,
       timeoutMs: 45000,
-      enrichSpecs: false,
+      enrichSpecs: true,
     })
 
     // Фильтр мусора: только цена > 0. Поисковики WB/YM/Ozon уже ранжируют по релевантности,

@@ -1,101 +1,133 @@
+// Figma screen 53:117 — pixel-perfect
+// Root: 1440×3078, bg #FFFFFF
+// Content (Frame 64): x=80, y=131, w=1280
+// Frame 46: column, gap=20px, w=1280
+// Section header (Frame 53): row, center, gap=25px, padding=10px 0, 1280×80
+//   name text: Open Sans SemiBold 600 40px #1A1A1A, lineHeight=52px
+//   count text: Open Sans SemiBold 600 25px #264B82
+// Card (Frame 64 component): column, center, gap=14px, padding=30px 30px 23px, 297×465, bg=#E7EEF7
+//   image: 265×265, bg=#FFFFFF
+//   Frame 68: column, gap=-4px, pb=10px, h=78
+//     Frame 65: row, center, padding=6px, 266×45
+//       price: Open Sans Regular 400 29px #1A1A1A, letterSpacing=3%
+//       badge: 35×32 transparent
+//     Frame 67: column, center, gap=20px, 266×37
+//       name: Open Sans Regular 400 20px #575757, 254×33
+//   Frame 69 (btn): column, center, padding=10px, 266×41, bg=#FFFFFF
+//     "Подробнее": Open Sans SemiBold 600 25px #264B82, 144×37
+
 import { useState, useEffect, useMemo, useRef } from 'react'
 import { useSearchParams, useNavigate } from 'react-router-dom'
-import { ArrowLeft, ChevronLeft, ChevronRight } from 'lucide-react'
 import ProductCard from '../components/ProductCard'
 import ProductModal from '../components/ProductModal'
 import SkeletonCard from '../components/SkeletonCard'
 
+// Figma node I56:143;56:137 — search icon 24×24
+function IconSearch24() {
+  return (
+    <svg width="24" height="24" viewBox="0 0 24 24" fill="none" style={{flexShrink:0}}>
+      <circle cx="11" cy="11" r="8" stroke="#264B82" strokeWidth="2"/>
+      <path d="M17 17L21 21" stroke="#264B82" strokeWidth="2" strokeLinecap="round"/>
+    </svg>
+  )
+}
+// Figma node I63:1428;63:646 — location icon 24×24
+function IconLocation24() {
+  return (
+    <svg width="24" height="24" viewBox="0 0 24 24" fill="none" style={{flexShrink:0}}>
+      <path d="M4.03702 4.6879C3.99755 4.59682 3.98638 4.49597 4.00496 4.39846C4.02354 4.30094 4.07101 4.21127 4.1412 4.14108C4.21139 4.07088 4.30107 4.02342 4.39858 4.00484C4.49609 3.98626 4.59694 3.99743 4.68802 4.0369L20.688 10.5369C20.7853 10.5765 20.8676 10.6458 20.9233 10.7349C20.979 10.824 21.0052 10.9283 20.9983 11.0331C20.9913 11.138 20.9515 11.2379 20.8845 11.3188C20.8175 11.3997 20.7267 11.4575 20.625 11.4839L14.501 13.0639C14.155 13.1529 13.8391 13.3329 13.5863 13.5852C13.3334 13.8376 13.1527 14.1531 13.063 14.4989L11.484 20.6249C11.4576 20.7266 11.3999 20.8174 11.319 20.8844C11.238 20.9514 11.1381 20.9912 11.0333 20.9981C10.9284 21.0051 10.8241 20.9789 10.735 20.9232C10.6459 20.8675 10.5767 20.7852 10.537 20.6879L4.03702 4.6879Z" stroke="#264B82" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/>
+    </svg>
+  )
+}
+// Figma node I78:691;70:669 — price icon 24×24
+function IconPrice24() {
+  return (
+    <svg width="24" height="24" viewBox="0 0 24 24" fill="none" style={{flexShrink:0}}>
+      <path d="M10 26.25H12.5V21.25H20V18.75H12.5V16.25H18.75C22.2 16.25 25 13.45 25 10C25 6.55 22.2 3.75 18.75 3.75H11.25C10.5625 3.75 10 4.3125 10 5V13.75H5V16.25H10V18.75H5V21.25H10V26.25ZM12.5 6.25H18.75C20.8125 6.25 22.5 7.9375 22.5 10C22.5 12.0625 20.8125 13.75 18.75 13.75H12.5V6.25Z" fill="#264B82" transform="scale(0.8) translate(0,0)"/>
+    </svg>
+  )
+}
+
+const REGIONS = ['Москва', 'Казань', 'Санкт-Петербург', 'Екатеринбург', 'Новосибирск', 'Нижний Новгород', 'Челябинск', 'Самара', 'Омск', 'Ростов-на-Дону']
+
 const SOURCE_ORDER = ['wildberries', 'ozon', 'yandex_market', 'runet']
 const SOURCE_META = {
-  wildberries:   { title: 'Wildberries',   color: '#6D28D9', dot: '#7C3AED', light: '#F5F3FF' },
-  ozon:          { title: 'Ozon',          color: '#1D4ED8', dot: '#2563EB', light: '#EFF6FF' },
-  yandex_market: { title: 'Яндекс Маркет', color: '#92400E', dot: '#D97706', light: '#FFFBEB' },
-  runet:         { title: 'Рунет',         color: '#065F46', dot: '#059669', light: '#ECFDF5' },
+  wildberries:   { title: 'Wildberries' },
+  ozon:          { title: 'Ozon' },
+  yandex_market: { title: 'Яндекс Маркет' },
+  runet:         { title: 'Другие источники' },
 }
 const SOURCE_DELAYS = { wildberries: 800, ozon: 2200, yandex_market: 3800, runet: 5000 }
 
-const CARD_WIDTH = 240   // px — крупная карточка
-const CARD_GAP   = 16    // px — зазор между карточками
+// card x positions: 0, 328, 655, 983 → gap = 328-297 = 31px
+const CARD_W = 297
+const CARD_GAP = 31
+
+function plural(n) {
+  if (n % 100 >= 11 && n % 100 <= 14) return 'товаров'
+  const r = n % 10
+  if (r === 1) return 'товар'
+  if (r >= 2 && r <= 4) return 'товара'
+  return 'товаров'
+}
 
 function Carousel({ products, onDetails }) {
-  const trackRef = useRef(null)
-  const [canLeft,  setCanLeft]  = useState(false)
-  const [canRight, setCanRight] = useState(true)
+  const ref = useRef(null)
+  const [canL, setCanL] = useState(false)
+  const [canR, setCanR] = useState(false)
 
-  const step = (CARD_WIDTH + CARD_GAP) * 2
-
-  const scroll = (dir) => {
-    const el = trackRef.current
+  const check = () => {
+    const el = ref.current
     if (!el) return
-    el.scrollBy({ left: dir * step, behavior: 'smooth' })
-  }
-
-  const onScroll = () => {
-    const el = trackRef.current
-    if (!el) return
-    setCanLeft(el.scrollLeft > 4)
-    setCanRight(el.scrollLeft + el.clientWidth < el.scrollWidth - 4)
+    setCanL(el.scrollLeft > 2)
+    setCanR(el.scrollLeft + el.clientWidth < el.scrollWidth - 2)
   }
 
   useEffect(() => {
-    const el = trackRef.current
+    const el = ref.current
     if (!el) return
-    onScroll()
-    el.addEventListener('scroll', onScroll, { passive: true })
-    return () => el.removeEventListener('scroll', onScroll)
+    check()
+    el.addEventListener('scroll', check, { passive: true })
+    window.addEventListener('resize', check)
+    return () => { el.removeEventListener('scroll', check); window.removeEventListener('resize', check) }
   }, [products])
 
-  const btn = (dir, enabled) => ({
-    position: 'absolute',
-    top: '50%', transform: 'translateY(-50%)',
-    [dir === -1 ? 'left' : 'right']: '-18px',
-    zIndex: 10,
-    width: '40px', height: '40px', borderRadius: '50%',
-    background: enabled ? '#FFFFFF' : 'rgba(255,255,255,0.4)',
-    border: '1.5px solid #E2E8F0',
-    boxShadow: enabled ? '0 4px 14px rgba(0,0,0,0.12)' : 'none',
+  const scroll = d => ref.current?.scrollBy({ left: d * (CARD_W + CARD_GAP) * 3, behavior: 'smooth' })
+
+  const arrowStyle = (side) => ({
+    position: 'absolute', [side]: '-20px', top: '50%', transform: 'translateY(-50%)',
+    zIndex: 10, width: '36px', height: '36px', borderRadius: '50%',
+    background: '#FFFFFF', border: '1px solid #D4DBE6',
     display: 'flex', alignItems: 'center', justifyContent: 'center',
-    cursor: enabled ? 'pointer' : 'default',
-    transition: 'all 0.15s',
-    color: enabled ? '#0F172A' : '#CBD5E1',
-    fontFamily: 'inherit',
+    cursor: 'pointer', fontFamily: 'inherit', flexShrink: 0,
+    boxShadow: '0 2px 8px rgba(0,0,0,0.1)',
   })
 
   return (
-    <div style={{ position: 'relative', padding: '4px 24px' }}>
-      <button
-        style={btn(-1, canLeft)}
-        onClick={() => canLeft && scroll(-1)}
-        aria-label="Листать назад"
-      >
-        <ChevronLeft size={20} strokeWidth={2.5} />
-      </button>
-
-      <div
-        ref={trackRef}
-        style={{
-          display: 'flex', gap: `${CARD_GAP}px`,
-          overflowX: 'auto',
-          scrollbarWidth: 'none',
-          msOverflowStyle: 'none',
-          WebkitOverflowScrolling: 'touch',
-        }}
-      >
-        <style>{`div::-webkit-scrollbar { display: none }`}</style>
-        {products.map((product, i) => (
-          <div key={product.id} style={{ minWidth: `${CARD_WIDTH}px`, flexShrink: 0 }}>
-            <ProductCard product={product} onDetails={() => onDetails(i)} />
-          </div>
+    <div style={{ position: 'relative' }}>
+      {canL && (
+        <button onClick={() => scroll(-1)} style={arrowStyle('left')}>
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none">
+            <path d="M15 18L9 12L15 6" stroke="#264B82" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"/>
+          </svg>
+        </button>
+      )}
+      <div ref={ref} style={{
+        display: 'flex', gap: `${CARD_GAP}px`,
+        overflowX: 'auto', scrollbarWidth: 'none', msOverflowStyle: 'none',
+      }}>
+        <style>{`.scroll-hide::-webkit-scrollbar{display:none}`}</style>
+        {products.map((p, i) => (
+          <ProductCard key={p.id} product={p} onDetails={() => onDetails(i)} />
         ))}
       </div>
-
-      <button
-        style={btn(1, canRight)}
-        onClick={() => canRight && scroll(1)}
-        aria-label="Листать вперёд"
-      >
-        <ChevronRight size={20} strokeWidth={2.5} />
-      </button>
+      {canR && (
+        <button onClick={() => scroll(1)} style={arrowStyle('right')}>
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none">
+            <path d="M9 18L15 12L9 6" stroke="#264B82" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"/>
+          </svg>
+        </button>
+      )}
     </div>
   )
 }
@@ -103,336 +135,407 @@ function Carousel({ products, onDetails }) {
 export default function ResultsPage() {
   const [searchParams] = useSearchParams()
   const navigate = useNavigate()
-  const query      = searchParams.get('q') || ''
-  const region     = searchParams.get('region') || 'Москва'
-  const priceFrom  = parseFloat(searchParams.get('priceFrom')) || null
-  const priceTo    = parseFloat(searchParams.get('priceTo'))   || null
-  const dateTo     = searchParams.get('dateTo') || null
+  const query    = searchParams.get('q') || ''
+  const region   = searchParams.get('region') || 'Москва'
+  const priceFrom = parseFloat(searchParams.get('priceFrom')) || null
+  const priceTo   = parseFloat(searchParams.get('priceTo')) || null
 
-  const deliveryDays = useMemo(() => {
-    if (!dateTo) return null
-    const today = new Date(); today.setHours(0, 0, 0, 0)
-    return Math.round((new Date(dateTo) - today) / 86400000)
-  }, [dateTo])
+  // Search bar state (for re-search)
+  const [searchQuery, setSearchQuery] = useState(query)
+  const [searchRegion, setSearchRegion] = useState(region)
+  const [searchPriceFrom, setSearchPriceFrom] = useState(searchParams.get('priceFrom') || '')
+  const [searchPriceTo, setSearchPriceTo] = useState(searchParams.get('priceTo') || '')
+  const [showRegion, setShowRegion] = useState(false)
+  const regionRef = useRef(null)
 
-  const [loadedSources, setLoadedSources] = useState([])
-  const [modalIndex, setModalIndex] = useState(null)
-  const [sourceProducts, setSourceProducts] = useState({})  // source → products[]
-  const [correction, setCorrection] = useState(null)
+  const [loaded, setLoaded]   = useState([])
+  const [srcData, setSrcData] = useState({})
+  const [modal, setModal]     = useState(null)
+  const [correction, setCorr] = useState(null)
+
+  useEffect(() => {
+    const h = e => { if (regionRef.current && !regionRef.current.contains(e.target)) setShowRegion(false) }
+    document.addEventListener('mousedown', h)
+    return () => document.removeEventListener('mousedown', h)
+  }, [])
+
+  const goSearch = (q = searchQuery) => {
+    if (!q.trim()) return
+    const p = new URLSearchParams({ q, region: searchRegion })
+    if (searchPriceFrom) p.set('priceFrom', searchPriceFrom)
+    if (searchPriceTo)   p.set('priceTo', searchPriceTo)
+    navigate(`/results?${p}`)
+  }
 
   useEffect(() => {
     fetch(`/api/correct?q=${encodeURIComponent(query)}`)
-      .then(r => r.json())
-      .then(d => { if (d.changed) setCorrection(d) })
-      .catch(() => {})
+      .then(r => r.json()).then(d => { if (d.changed) setCorr(d) }).catch(() => {})
   }, [query])
 
   useEffect(() => {
-    setLoadedSources([])
-    setSourceProducts({})
-
+    setLoaded([]); setSrcData({})
     const q = encodeURIComponent(query)
     const r = encodeURIComponent(region)
-
-    const fetchSource = async (src, apiPath, delay) => {
+    const fetch_ = async (src, path, delay) => {
       await new Promise(res => setTimeout(res, delay))
       try {
-        const resp = await fetch(`${apiPath}?q=${q}&region=${r}`)
-        if (resp.ok) {
-          const data = await resp.json()
+        const res = await fetch(`${path}?q=${q}&region=${r}`)
+        if (res.ok) {
+          const data = await res.json()
           const products = (data.products ?? data).map((p, i) => ({
-            ...p,
-            id: p.id ?? `${src}_${i}`,
-            source: p.source ?? src,
+            ...p, id: p.id ?? `${src}_${i}`, source: p.source ?? src,
           }))
-          setSourceProducts(prev => ({ ...prev, [src]: products }))
+          setSrcData(prev => ({ ...prev, [src]: products }))
         }
-      } catch {
-        // источник недоступен
-      } finally {
-        setLoadedSources(prev => [...prev, src])
-      }
+      } catch {}
+      finally { setLoaded(prev => [...prev, src]) }
     }
-
-    const controllers = []
-    fetchSource('wildberries',   '/api/search/wildberries',   SOURCE_DELAYS.wildberries)
-    fetchSource('ozon',          '/api/search/ozon',          SOURCE_DELAYS.ozon)
-    fetchSource('yandex_market', '/api/search/yandex_market', SOURCE_DELAYS.yandex_market)
-    fetchSource('runet',         '/api/search/runet',         SOURCE_DELAYS.runet)
-
-    // таймауты-гарантии: если API висит — всё равно показываем секцию
-    const fallbackTimers = SOURCE_ORDER.map(src =>
-      setTimeout(() => setLoadedSources(prev => prev.includes(src) ? prev : [...prev, src]),
-        SOURCE_DELAYS[src] + 55000)
-    )
-
-    return () => fallbackTimers.forEach(clearTimeout)
+    fetch_('wildberries',   '/api/search/wildberries',   SOURCE_DELAYS.wildberries)
+    fetch_('ozon',          '/api/search/ozon',          SOURCE_DELAYS.ozon)
+    fetch_('yandex_market', '/api/search/yandex_market', SOURCE_DELAYS.yandex_market)
+    fetch_('runet',         '/api/search/runet',         SOURCE_DELAYS.runet)
+    const timers = SOURCE_ORDER.map(src =>
+      setTimeout(() => setLoaded(prev => prev.includes(src) ? prev : [...prev, src]), SOURCE_DELAYS[src] + 55000))
+    return () => timers.forEach(clearTimeout)
   }, [query, region])
 
   const allProducts = useMemo(() => {
     return SOURCE_ORDER
-      .filter(src => loadedSources.includes(src))
-      .flatMap(src => sourceProducts[src] ?? [])
+      .filter(src => loaded.includes(src))
+      .flatMap(src => srcData[src] ?? [])
       .filter(p => {
         if (priceFrom && p.price < priceFrom) return false
-        if (priceTo   && p.price > priceTo)   return false
+        if (priceTo && p.price > priceTo) return false
         return true
       })
-  }, [loadedSources, sourceProducts, priceFrom, priceTo])
+  }, [loaded, srcData, priceFrom, priceTo])
 
-  const allLoaded = loadedSources.length === SOURCE_ORDER.length
-
-  const nmck = useMemo(() => {
-    if (!allLoaded || allProducts.length === 0) return null
-    const prices = allProducts.map(p => p.price).filter(Boolean).sort((a, b) => a - b)
-    if (prices.length === 0) return null
-    const mean = prices.reduce((s, p) => s + p, 0) / prices.length
-    const filtered = prices.filter(p => Math.abs(p - mean) / mean <= 0.33)
-    const valid = filtered.length >= 5 ? filtered : prices
-    const mid = Math.floor(valid.length / 2)
-    const median = valid.length % 2 === 0
-      ? (valid[mid - 1] + valid[mid]) / 2
-      : valid[mid]
-    const validMean = valid.reduce((s, p) => s + p, 0) / valid.length
-    const variance = valid.reduce((s, p) => s + (p - validMean) ** 2, 0) / valid.length
-    const cv = Math.round((Math.sqrt(variance) / validMean) * 100)
-    return {
-      total: allProducts.length,
-      sources: new Set(allProducts.map(p => p.source)).size,
-      median: Math.round(median),
-      min: Math.round(prices[0]),
-      max: Math.round(prices[prices.length - 1]),
-      outliers: prices.length - valid.length,
-      cv,
-      cvOk: cv <= 33,
-    }
-  }, [allLoaded, allProducts])
+  const allLoaded = loaded.length === SOURCE_ORDER.length
 
   return (
-    <div style={{ minHeight: '100vh', background: '#F1F5F9' }}>
+    // Root: bg #FFFFFF, font Open Sans
+    <div style={{ minHeight: '100vh', background: '#FFFFFF', fontFamily: "'Open Sans', sans-serif" }}>
 
-      {/* Шапка */}
-      <header style={{
-        background: '#0B1628',
-        position: 'sticky', top: 0, zIndex: 40,
-        borderBottom: '1px solid rgba(255,255,255,0.06)',
-      }}>
-        <div style={{
-          maxWidth: '1400px', margin: '0 auto', padding: '0 24px',
-          height: '60px', display: 'flex', alignItems: 'center', gap: '16px',
-        }}>
-          <button
-            onClick={() => navigate('/')}
-            aria-label="Назад"
-            style={{
-              fontFamily: 'inherit',
-              width: '36px', height: '36px', borderRadius: '10px',
-              border: '1px solid rgba(255,255,255,0.1)',
-              background: 'rgba(255,255,255,0.05)',
-              color: 'rgba(255,255,255,0.7)',
-              display: 'flex', alignItems: 'center', justifyContent: 'center',
-              cursor: 'pointer', transition: 'background 0.15s',
-            }}
-            onMouseEnter={e => e.currentTarget.style.background = 'rgba(255,255,255,0.12)'}
-            onMouseLeave={e => e.currentTarget.style.background = 'rgba(255,255,255,0.05)'}
-          >
-            <ArrowLeft size={18} strokeWidth={2} />
-          </button>
+      {/* Figma: image 2 (63:1287) — 255×84 at x=0,y=0, IMAGE fill (header logo) */}
+      <div style={{ position: 'relative', width: '100%', background: '#FFFFFF' }}>
+        <img
+          src="/header-logo.png"
+          alt=""
+          style={{ width: '255px', height: '84px', objectFit: 'fill', display: 'block' }}
+        />
+        {/* Back button overlay */}
+        <button
+          onClick={() => navigate('/')}
+          style={{
+            position: 'absolute', top: '50%', right: '80px', transform: 'translateY(-50%)',
+            background: 'none', border: 'none', cursor: 'pointer',
+            fontFamily: "'Open Sans', sans-serif",
+            fontWeight: 400, fontSize: '20px', color: '#264B82',
+            display: 'flex', alignItems: 'center', gap: '8px',
+          }}
+          onMouseEnter={e => e.currentTarget.style.opacity = '0.7'}
+          onMouseLeave={e => e.currentTarget.style.opacity = '1'}
+        >
+          ← Назад
+        </button>
+      </div>
 
-          <div style={{ flex: 1, minWidth: 0 }}>
-            <p style={{ color: '#FFFFFF', fontWeight: 700, fontSize: '15px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{query}</p>
-            <p style={{ color: 'rgba(255,255,255,0.35)', fontSize: '12px', marginTop: '1px' }}>{region}</p>
+      {/* Figma Frame 64: x=80, y=131, w=1280 */}
+      <div style={{ width: '1280px', margin: '0 auto', paddingTop: '47px' }}>
+
+        {/* Figma Frame 46: column, gap=20px, w=1280 */}
+        <div style={{ display: 'flex', flexDirection: 'column', gap: '20px', width: '1280px' }}>
+
+          {/* Figma: Поиск товара (layout_ZQK83G): row, center, fill, padding 10px 20px, gap 10px, fill #E7EEF7 */}
+          <div style={{
+            display: 'flex', flexDirection: 'row', alignItems: 'center',
+            gap: '10px', padding: '10px 20px',
+            background: '#E7EEF7',
+            width: '100%', boxSizing: 'border-box',
+            position: 'relative',
+          }}>
+            <IconSearch24 />
+            <input
+              type="text"
+              value={searchQuery}
+              onChange={e => setSearchQuery(e.target.value)}
+              onKeyDown={e => e.key === 'Enter' && goSearch()}
+              placeholder="Поиск товара"
+              style={{
+                flex: 1, border: 'none', background: 'transparent',
+                fontFamily: "'Open Sans', sans-serif",
+                fontWeight: 400, fontSize: '20px', color: '#264B82',
+                lineHeight: '24px',
+                outline: 'none', minWidth: 0,
+              }}
+            />
+            <button
+              onClick={() => goSearch()}
+              style={{
+                background: '#264B82', border: 'none', borderRadius: '8px',
+                padding: '6px 20px', color: '#FFFFFF',
+                fontFamily: "'Open Sans', sans-serif",
+                fontWeight: 600, fontSize: '18px',
+                cursor: 'pointer', flexShrink: 0,
+                height: '36px', display: 'flex', alignItems: 'center',
+              }}
+              onMouseEnter={e => e.currentTarget.style.opacity='0.85'}
+              onMouseLeave={e => e.currentTarget.style.opacity='1'}
+            >
+              Найти
+            </button>
           </div>
 
-          {/* Dot-индикаторы источников */}
-          <div style={{ display: 'flex', gap: '20px', flexShrink: 0 }}>
-            {SOURCE_ORDER.map(src => {
-              const m = SOURCE_META[src]
-              const loaded = loadedSources.includes(src)
-              return (
-                <div key={src} style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
-                  <div style={{
-                    width: '7px', height: '7px', borderRadius: '50%',
-                    background: loaded ? m.dot : 'rgba(255,255,255,0.15)',
-                    transition: 'background 0.4s',
-                    boxShadow: loaded ? `0 0 8px ${m.dot}80` : 'none',
-                  }} />
-                  <span style={{
-                    fontSize: '12px', fontWeight: 600,
-                    color: loaded ? 'rgba(255,255,255,0.75)' : 'rgba(255,255,255,0.2)',
-                    transition: 'color 0.4s',
-                  }}>
-                    {m.title}
-                  </span>
-                </div>
-              )
-            })}
-          </div>
-        </div>
-      </header>
+          {/* Figma: correction banner */}
+          {correction && (
+            <div style={{
+              fontFamily: "'Open Sans', sans-serif",
+              fontWeight: 400, fontSize: '16px', color: '#000000',
+            }}>
+              *Исправлено с «{correction.original}» на «{correction.corrected}»
+            </div>
+          )}
 
-      {correction && (
-        <div style={{
-          background: '#EFF6FF',
-          borderBottom: '1px solid #BFDBFE',
-          padding: '10px 24px',
-          display: 'flex', alignItems: 'center', gap: '10px',
-          fontSize: '13px', color: '#1E40AF',
-        }}>
-          <span style={{ opacity: 0.6 }}>✦</span>
-          <span>
-            Исправлено:{' '}
-            <span style={{ fontWeight: 700, textDecoration: 'line-through', opacity: 0.55 }}>
-              «{correction.original}»
-            </span>
-            {' → '}
-            <span style={{ fontWeight: 700 }}>«{correction.corrected}»</span>
-          </span>
-        </div>
-      )}
-
-      <main style={{ maxWidth: '1400px', margin: '0 auto', padding: '32px 24px' }}>
-
-        {SOURCE_ORDER.map(src => {
-          const m        = SOURCE_META[src]
-          const loaded   = loadedSources.includes(src)
-          const products = allProducts.filter(p => p.source === src)
-
-          return (
-            <section key={src} style={{ marginBottom: '44px' }}>
-              <div style={{ display: 'flex', alignItems: 'center', gap: '12px', marginBottom: '18px', paddingLeft: '24px' }}>
-                <div style={{
-                  width: '10px', height: '10px', borderRadius: '50%',
-                  background: loaded ? m.dot : '#CBD5E1',
-                  boxShadow: loaded ? `0 0 10px ${m.dot}60` : 'none',
-                  transition: 'all 0.4s',
-                }} />
-                <h2 style={{
-                  fontSize: '18px', fontWeight: 800, letterSpacing: '-0.01em',
-                  color: loaded ? m.color : '#94A3B8',
-                  transition: 'color 0.4s',
+          {/* Figma: Frame 45 (layout_3E6JPL): row, center, fill, gap 20px, radius 10px — регион + цена */}
+          <div style={{
+            display: 'flex', flexDirection: 'row', alignItems: 'center',
+            gap: '20px', width: '100%', boxSizing: 'border-box',
+          }}>
+            {/* Выбор региона (layout_X2YRVL): row, center, fill, padding 10px 20px, h 45, fill #E7EEF7 */}
+            <div ref={regionRef} style={{ position: 'relative', flex: 1 }}>
+              <div
+                onClick={() => setShowRegion(v => !v)}
+                style={{
+                  display: 'flex', flexDirection: 'row', alignItems: 'center',
+                  gap: '10px', padding: '10px 20px',
+                  background: '#E7EEF7', height: '45px', boxSizing: 'border-box',
+                  cursor: 'pointer', width: '100%',
+                }}
+                onMouseEnter={e => e.currentTarget.style.background='#D4DBE6'}
+                onMouseLeave={e => e.currentTarget.style.background='#E7EEF7'}
+              >
+                <IconLocation24 />
+                <span style={{
+                  fontFamily: "'Open Sans', sans-serif",
+                  fontWeight: 400, fontSize: '20px', color: '#264B82',
+                  lineHeight: '24px', flex: 1,
                 }}>
-                  {m.title}
-                </h2>
-                {loaded && products.length > 0 && (
-                  <span style={{
-                    padding: '3px 12px', borderRadius: '100px',
-                    background: m.light, color: m.color,
-                    fontSize: '12px', fontWeight: 700,
-                  }}>
-                    {products.length} {products.length === 1 ? 'товар' : products.length < 5 ? 'товара' : 'товаров'}
-                  </span>
-                )}
-                {loaded && products.length === 0 && (
-                  <span style={{ fontSize: '12px', color: '#94A3B8' }}>совпадений не найдено</span>
-                )}
-                {!loaded && (
-                  <span style={{ fontSize: '12px', color: '#94A3B8', fontStyle: 'italic' }}>загружается…</span>
-                )}
+                  {searchRegion}
+                </span>
               </div>
-
-              {!loaded ? (
-                <div style={{ display: 'flex', gap: `${CARD_GAP}px`, padding: '4px 24px', overflow: 'hidden' }}>
-                  {[...Array(4)].map((_, i) => (
-                    <div key={i} style={{ minWidth: `${CARD_WIDTH}px`, flexShrink: 0 }}>
-                      <SkeletonCard />
+              {showRegion && (
+                <div style={{
+                  position: 'absolute', top: 'calc(100% + 2px)', left: 0,
+                  minWidth: '100%', background: '#FFFFFF',
+                  border: '1px solid #D4DBE6', borderRadius: '8px',
+                  boxShadow: '0 4px 12px rgba(0,0,0,0.15)',
+                  zIndex: 100, overflow: 'hidden',
+                }}>
+                  {REGIONS.map((r, i) => (
+                    <div
+                      key={r}
+                      onMouseDown={() => { setSearchRegion(r); setShowRegion(false) }}
+                      style={{
+                        padding: '8px 20px',
+                        fontFamily: "'Open Sans', sans-serif",
+                        fontWeight: 400, fontSize: '18px', color: '#264B82',
+                        cursor: 'pointer',
+                        borderBottom: i < REGIONS.length-1 ? '1px solid #D4DBE6' : 'none',
+                        background: r===searchRegion ? '#E7EEF7' : '#FFFFFF',
+                      }}
+                      onMouseEnter={e => e.currentTarget.style.background='#E7EEF7'}
+                      onMouseLeave={e => e.currentTarget.style.background=r===searchRegion?'#E7EEF7':'#FFFFFF'}
+                    >
+                      {r}
                     </div>
                   ))}
                 </div>
-              ) : products.length > 0 ? (
-                <Carousel
-                  products={products}
-                  onDetails={(i) => setModalIndex(allProducts.findIndex(p => p.id === products[i].id))}
-                />
-              ) : null}
-            </section>
-          )
-        })}
+              )}
+            </div>
 
-        {allLoaded && nmck && (
-          <div style={{
-            margin: '8px 0 44px',
-            background: '#FFFFFF',
-            borderRadius: '16px',
-            border: '1px solid #E2E8F0',
-            padding: '24px 32px',
-            display: 'grid',
-            gridTemplateColumns: 'repeat(auto-fit, minmax(160px, 1fr))',
-            gap: '24px',
-          }}>
-            {[
-              { label: 'Найдено товаров', value: `${nmck.total}`, sub: `из ${nmck.sources} источников` },
-              { label: 'Медиана', value: `${nmck.median.toLocaleString('ru-RU')} ₽`, sub: 'рекомендованная НМЦК', accent: true },
-              { label: 'Диапазон цен', value: `${nmck.min.toLocaleString('ru-RU')} — ${nmck.max.toLocaleString('ru-RU')} ₽`, sub: 'мин — макс' },
-              { label: 'Отброшено выбросов', value: `${nmck.outliers}`, sub: 'по 44-ФЗ п.3.20' },
-              { label: 'Коэф. вариации', value: `${nmck.cv}%`, sub: nmck.cvOk ? '✓ выборка однородна' : '⚠ разброс > 33%', warn: !nmck.cvOk },
-              { label: 'Регион', value: region, sub: 'цены актуальны для региона' },
-              ...(deliveryDays !== null ? [{
-                label: 'Срок поставки',
-                value: `${deliveryDays} дн.`,
-                sub: deliveryDays >= 7 ? '✓ достаточно для закупки' : '⚠ менее недели — риск',
-                warn: deliveryDays < 7,
-              }] : []),
-            ].map(({ label, value, sub, accent, warn }) => (
-              <div key={label}>
-                <p style={{ fontSize: '11px', fontWeight: 600, color: '#94A3B8', textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: '6px' }}>{label}</p>
-                <p style={{ fontSize: accent ? '22px' : '18px', fontWeight: 800, color: accent ? '#1D6ECA' : warn ? '#DC2626' : '#0F172A', lineHeight: 1.1 }}>{value}</p>
-                <p style={{ fontSize: '12px', color: '#64748B', marginTop: '4px' }}>{sub}</p>
-              </div>
-            ))}
-          </div>
-        )}
-
-        {!allLoaded && (
-          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '10px', padding: '16px', color: '#94A3B8', fontSize: '14px' }}>
+            {/* Цена (layout_YGA6H5): row, center, padding 10px 20px, 414×45, fill #E7EEF7 */}
             <div style={{
-              width: '16px', height: '16px', borderRadius: '50%',
-              border: '2px solid #CBD5E1', borderTopColor: '#1D6ECA',
-              animation: 'spin 0.8s linear infinite',
-            }} />
-            Ищем ещё источники...
-            <style>{`@keyframes spin { to { transform: rotate(360deg) } }`}</style>
+              display: 'flex', flexDirection: 'row', alignItems: 'center',
+              gap: '10px', padding: '10px 20px',
+              background: '#E7EEF7',
+              width: '414px', height: '45px', boxSizing: 'border-box',
+              flexShrink: 0,
+            }}>
+              <IconPrice24 />
+              <span style={{
+                fontFamily: "'Open Sans', sans-serif",
+                fontWeight: 400, fontSize: '20px', color: '#264B82',
+                whiteSpace: 'nowrap', flexShrink: 0,
+              }}>Цена от</span>
+              <input
+                type="number"
+                value={searchPriceFrom}
+                onChange={e => setSearchPriceFrom(e.target.value)}
+                onKeyDown={e => e.key === 'Enter' && goSearch()}
+                placeholder="от"
+                style={{
+                  width: '70px', height: '25px',
+                  border: '1px solid #264B82', borderRadius: '6px',
+                  background: 'transparent', padding: '0 8px',
+                  fontFamily: "'Open Sans', sans-serif",
+                  fontWeight: 400, fontSize: '18px', color: '#1A1A1A',
+                  outline: 'none', boxSizing: 'border-box', flexShrink: 0,
+                }}
+              />
+              <span style={{
+                fontFamily: "'Open Sans', sans-serif",
+                fontWeight: 400, fontSize: '20px', color: '#264B82',
+                whiteSpace: 'nowrap', flexShrink: 0,
+              }}>до</span>
+              <input
+                type="number"
+                value={searchPriceTo}
+                onChange={e => setSearchPriceTo(e.target.value)}
+                onKeyDown={e => e.key === 'Enter' && goSearch()}
+                placeholder="до"
+                style={{
+                  width: '70px', height: '25px',
+                  border: '1px solid #264B82', borderRadius: '6px',
+                  background: 'transparent', padding: '0 8px',
+                  fontFamily: "'Open Sans', sans-serif",
+                  fontWeight: 400, fontSize: '18px', color: '#1A1A1A',
+                  outline: 'none', boxSizing: 'border-box', flexShrink: 0,
+                }}
+              />
+            </div>
           </div>
-        )}
 
-        {allLoaded && allProducts.length === 0 && (
-          <div style={{
-            display: 'flex', flexDirection: 'column', alignItems: 'center',
-            justifyContent: 'center', padding: '80px 24px', textAlign: 'center',
-          }}>
-            <div style={{ fontSize: '48px', marginBottom: '20px', opacity: 0.25 }}>🔍</div>
-            <p style={{ fontSize: '20px', fontWeight: 700, color: '#0F172A', marginBottom: '8px' }}>
-              По запросу «{query}» ничего не найдено
-            </p>
-            <p style={{ fontSize: '14px', color: '#64748B', marginBottom: '28px', maxWidth: '360px', lineHeight: 1.6 }}>
-              Попробуйте изменить формулировку — например, использовать более общее название товара или исправить опечатку.
-            </p>
-            <button
-              onClick={() => navigate(`/?q=${encodeURIComponent(query)}`)}
-              style={{
-                padding: '12px 28px', borderRadius: '12px',
-                background: '#1D6ECA', color: '#FFFFFF',
-                fontSize: '14px', fontWeight: 700,
-                border: 'none', cursor: 'pointer',
-                transition: 'background 0.15s',
-                fontFamily: 'inherit',
-              }}
-              onMouseEnter={e => e.currentTarget.style.background = '#1558A8'}
-              onMouseLeave={e => e.currentTarget.style.background = '#1D6ECA'}
-            >
-              Уточнить запрос
-            </button>
-          </div>
-        )}
-      </main>
+          {SOURCE_ORDER.map(src => {
+            const m        = SOURCE_META[src]
+            const isLoaded = loaded.includes(src)
+            const products = allProducts.filter(p => p.source === src)
+            const count    = products.length
 
-      {modalIndex !== null && (
+            return (
+              <div key={src}>
+                {/* Figma Frame 53 (header): row, center, gap=25px, padding=10px 0, 1280×80 */}
+                <div style={{
+                  display: 'flex', flexDirection: 'row',
+                  alignItems: 'center', gap: '25px',
+                  padding: '10px 0px',
+                  width: '1280px', height: '80px',
+                  boxSizing: 'border-box',
+                }}>
+                  {/* Source name: Open Sans SemiBold 600 40px #1A1A1A, lineHeight=52px */}
+                  <span style={{
+                    fontFamily: "'Open Sans', sans-serif",
+                    fontWeight: 600, fontSize: '40px',
+                    lineHeight: '52px', color: '#1A1A1A',
+                    opacity: isLoaded ? 1 : 0.35,
+                    transition: 'opacity 0.4s',
+                    display: 'block',
+                  }}>
+                    {m.title}
+                  </span>
+
+                  {/* Count badge (Frame 60): 232×60, text SemiBold 600 25px #264B82 */}
+                  {isLoaded && count > 0 && (
+                    <div style={{ width: '232px', height: '60px', display: 'flex', alignItems: 'center' }}>
+                      <span style={{
+                        fontFamily: "'Open Sans', sans-serif",
+                        fontWeight: 600, fontSize: '25px', color: '#264B82',
+                        lineHeight: '34px', display: 'block',
+                      }}>
+                        {count} {plural(count)}
+                      </span>
+                    </div>
+                  )}
+                  {!isLoaded && (
+                    <span style={{
+                      fontFamily: "'Open Sans', sans-serif",
+                      fontWeight: 400, fontSize: '20px', color: '#575757',
+                    }}>
+                      загружается…
+                    </span>
+                  )}
+                  {isLoaded && count === 0 && (
+                    <span style={{
+                      fontFamily: "'Open Sans', sans-serif",
+                      fontWeight: 400, fontSize: '20px', color: '#575757',
+                    }}>
+                      нет результатов
+                    </span>
+                  )}
+                </div>
+
+                {/* Cards row — y=103 offset from section start in Figma */}
+                <div style={{ marginTop: '0' }}>
+                  {!isLoaded ? (
+                    <div style={{ display: 'flex', gap: `${CARD_GAP}px` }}>
+                      {[...Array(4)].map((_, i) => <SkeletonCard key={i} />)}
+                    </div>
+                  ) : count > 0 ? (
+                    <Carousel
+                      products={products}
+                      onDetails={i => setModal(allProducts.findIndex(p => p.id === products[i].id))}
+                    />
+                  ) : null}
+                </div>
+              </div>
+            )
+          })}
+
+          {/* Rectangle 2 — divider: 1440×80, transparent (just spacing) */}
+          {!allLoaded && (
+            <div style={{
+              display: 'flex', alignItems: 'center', gap: '10px',
+              fontFamily: "'Open Sans', sans-serif",
+              fontWeight: 400, fontSize: '20px', color: '#575757',
+              padding: '20px 0',
+            }}>
+              <span style={{
+                display: 'inline-block', width: '16px', height: '16px', borderRadius: '50%',
+                border: '2px solid #D4DBE6', borderTopColor: '#264B82',
+                animation: 'spin 0.8s linear infinite', flexShrink: 0,
+              }} />
+              Ищём ещё источники…
+            </div>
+          )}
+
+          {allLoaded && allProducts.length === 0 && (
+            <div style={{ padding: '80px 0', textAlign: 'left' }}>
+              <span style={{
+                fontFamily: "'Open Sans', sans-serif",
+                fontWeight: 600, fontSize: '40px', lineHeight: '52px', color: '#1A1A1A',
+                display: 'block', marginBottom: '20px',
+              }}>
+                По запросу «{query}» ничего не найдено
+              </span>
+              <button
+                onClick={() => navigate(`/?q=${encodeURIComponent(query)}`)}
+                style={{
+                  padding: '10px',
+                  width: '266px', height: '41px',
+                  background: '#FFFFFF',
+                  border: 'none', cursor: 'pointer',
+                  fontFamily: "'Open Sans', sans-serif",
+                  fontWeight: 600, fontSize: '25px', color: '#264B82',
+                  display: 'flex', alignItems: 'center', justifyContent: 'center',
+                }}
+                onMouseEnter={e => e.currentTarget.style.opacity = '0.7'}
+                onMouseLeave={e => e.currentTarget.style.opacity = '1'}
+              >
+                Уточнить запрос
+              </button>
+            </div>
+          )}
+        </div>
+      </div>
+
+      <style>{`@keyframes spin{to{transform:rotate(360deg)}}`}</style>
+
+      {modal !== null && (
         <ProductModal
-          product={allProducts[modalIndex]}
+          product={allProducts[modal]}
           allProducts={allProducts}
-          currentIndex={modalIndex}
-          onClose={() => setModalIndex(null)}
-          onNavigate={setModalIndex}
+          currentIndex={modal}
+          onClose={() => setModal(null)}
+          onNavigate={setModal}
         />
       )}
     </div>

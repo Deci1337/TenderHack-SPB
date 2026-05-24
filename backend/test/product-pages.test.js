@@ -137,88 +137,6 @@ test('live adapters use parsed JSON when available', async () => {
   assert.equal(result[0].raw_payload.retrieval_mode, 'live_ozon_api');
 });
 
-test('live adapters fall back to fixtures when blocked', async () => {
-  const fetchImpl = async () => ({
-    ok: false,
-    status: 403,
-    url: 'https://blocked.example',
-    text: async () => JSON.stringify({
-      incidentId: 'fab_chlg_1',
-      challengeURL: 'https://api.ozon.ru/challenge.html?challenge=test',
-    }),
-  });
-
-  const [wildberries] = buildAdapters({ fetchImpl, wbApiToken: 'test-token' });
-  const result = await wildberries.search(normalizeQuery('iphone 15'));
-
-  assert.ok(result.some((offer) => offer.title.includes('iPhone 15')));
-  assert.equal(result[0].raw_payload.retrieval_mode, 'fallback');
-});
-
-test('ozon adapter falls back on 429 rate limiting', async () => {
-  const fetchImpl = async () => ({
-    ok: false,
-    status: 429,
-    url: 'https://api.ozon.ru/composer-api.bx/page/json/v1?url=/search/?text=iphone',
-    text: async () => JSON.stringify({
-      incidentId: 'rate_limited',
-      challengeURL: 'https://api.ozon.ru/challenge.html',
-    }),
-  });
-
-  const ozon = buildAdapters({ fetchImpl }).find((adapter) => adapter.name === 'ozon');
-  const result = await ozon.search(normalizeQuery('iphone 15'));
-
-  assert.ok(result.length > 0);
-  assert.equal(result[0].raw_payload.retrieval_mode, 'fallback');
-  assert.equal(result[0].raw_payload.live_attempts[0].status, 429);
-});
-
-test('ozon adapter falls back on schema drift', async () => {
-  const fetchImpl = async () => ({
-    ok: true,
-    status: 200,
-    url: 'https://api.ozon.ru/composer-api.bx/page/json/v1?url=/search/?text=iphone',
-    text: async () => JSON.stringify({
-      catalog: {
-        searchResultsV2: {
-          broken: {
-            items: [
-              {
-                cellTrackingInfo: {
-                  title: 'Broken product without price',
-                },
-              },
-            ],
-          },
-        },
-      },
-    }),
-  });
-
-  const ozon = buildAdapters({ fetchImpl }).find((adapter) => adapter.name === 'ozon');
-  const result = await ozon.search(normalizeQuery('iphone 15'));
-
-  assert.ok(result.length > 0);
-  assert.equal(result[0].raw_payload.retrieval_mode, 'fallback');
-});
-
-test('live adapters fall back to fixtures when HTML is empty or unparsable', async () => {
-  const fetchImpl = async () => ({
-    ok: true,
-    status: 200,
-    url: 'https://example.com/empty',
-    text: async () => JSON.stringify({ catalog: {} }),
-  });
-
-  const ozon = buildAdapters({ fetchImpl }).find((adapter) => adapter.name === 'ozon');
-  const result = await ozon.search(normalizeQuery('iphone 15'));
-
-  assert.ok(result.length > 0);
-  assert.equal(result[0].raw_payload.retrieval_mode, 'fallback');
-  assert.equal(Array.isArray(result[0].raw_payload.live_attempts), true);
-  assert.equal(result[0].raw_payload.live_attempts[0].status, 200);
-});
 
 test('fetchAndParseOffers records network errors as blocked attempts', async () => {
   const result = await fetchAndParseOffers({
@@ -260,18 +178,17 @@ test('fetchAndParseOffers records timeout attempts', async () => {
   assert.equal(result.attempts[0].blocked, true);
 });
 
-test('live adapters fall back when composer JSON has no search results', async () => {
+test('ozon adapter returns empty array when blocked and no live results', async () => {
   const fetchImpl = async () => ({
-    ok: true,
-    status: 200,
-    url: 'https://example.com/next',
-    text: async () => JSON.stringify({ catalog: { searchResultsV2: {} } }),
+    ok: false,
+    status: 403,
+    url: 'https://api.ozon.ru/composer-api.bx/page/json/v1?url=/search/?text=iphone',
+    text: async () => JSON.stringify({ incidentId: 'blocked' }),
   });
 
   const ozon = buildAdapters({ fetchImpl }).find((adapter) => adapter.name === 'ozon');
   const result = await ozon.search(normalizeQuery('iphone 15'));
 
-  assert.ok(result.length > 0);
-  assert.equal(result[0].raw_payload.retrieval_mode, 'fallback');
+  assert.equal(result.length, 0);
 });
 

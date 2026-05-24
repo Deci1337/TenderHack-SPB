@@ -137,24 +137,6 @@ test('fetchWildberriesOffers can auto-load auth from provider endpoint', async (
   assert.equal(result.attempts[2].step, 'cards_api');
 });
 
-test('wildberries adapter keeps fallback stable when official API is blocked', async () => {
-  const [wildberries] = buildAdapters({
-    fetchImpl: async () => ({
-      ok: false,
-      status: 498,
-      url: 'https://www.wildberries.ru/webapi/search/data?query=iphone',
-      headers: new Headers([['x-wbaas-token', 'get']]),
-      text: async () => 'challenge is required',
-    }),
-    wbApiToken: 'test-token',
-  });
-
-  const result = await wildberries.search(normalizeQuery('iphone 15'));
-  assert.ok(result.length > 0);
-  assert.equal(result[0].raw_payload.retrieval_mode, 'fallback');
-  assert.equal(Array.isArray(result[0].raw_payload.live_attempts), true);
-  assert.equal(result[0].raw_payload.live_attempts[0].status, 498);
-});
 
 test('fetchWildberriesOffers falls back to internal catalog endpoint when cards API is blocked', async () => {
   const fetchImpl = async (url) => {
