@@ -8,3 +8,7 @@ build/
 *.log
 .venv/
 venv/
+.pytest_cache/
+figma_*.png
+*.md
+!frontend/src/**/*.md
