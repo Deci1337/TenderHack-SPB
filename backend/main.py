@@ -112,7 +112,7 @@ async def search_runet_endpoint(q: str = "", region: str = "Москва"):
     }
 
 
-async def _call_parser(source: str, q: str, region: str, limit: int = 10) -> dict:
+async def _call_parser(source: str, q: str, region: str, limit: int = 15) -> dict:
     """Вызывает Node.js parser server. Возвращает {products, liveHit}."""
     try:
         async with httpx.AsyncClient(timeout=50.0) as client:
@@ -144,8 +144,7 @@ async def _search_with_fallback(source: str, q: str, region: str, py_fn):
         return data
     # Node.js server unavailable or returned 0 results — use Python parser
     try:
-        # Python-парсер сам тянет 25 кандидатов и возвращает медианные 8.
-        products = await py_fn(q, region, 10)
+        products = await py_fn(q, region, 15)
         return {
             "source": source,
             "products": [_mp_to_dict(p, source, i) for i, p in enumerate(products)],

@@ -1,16 +1,35 @@
 """
-Локальная проверка опечаток через symspellpy + русский словарь.
-Внешние API запрещены по ТЗ — всё офлайн.
+Локальная орфография через symspellpy + ru_dict_domain.txt (закупочная лексика).
+
+Исправляем только опечатки с edit distance ≤ 1, если результат — слово из domain-словаря.
+Сленг и слова вне словаря не трогаем — их обрабатывает Qwen.
 """
 
 import os
 import threading
+from pathlib import Path
+
 from symspellpy import SymSpell, Verbosity
+
+_ML_DIR = Path(__file__).resolve().parent
+DOMAIN_DICT_PATH = str(_ML_DIR / "ru_dict_domain.txt")
+
+MAX_EDIT_DISTANCE = 1
 
 _sym: SymSpell | None = None
 _lock = threading.Lock()
 
-DICT_PATH = os.path.join(os.path.dirname(__file__), "ru_dict.txt")
+
+def dictionary_paths() -> dict[str, str]:
+    return {"domain": DOMAIN_DICT_PATH}
+
+
+def ensure_dictionaries() -> None:
+    if not os.path.isfile(DOMAIN_DICT_PATH):
+        raise FileNotFoundError(
+            f"Не найден domain-словарь: {DOMAIN_DICT_PATH}\n"
+            "Файл должен лежать в ml/ (коммитится в git)."
+        )
 
 
 def _load() -> SymSpell:
@@ -20,53 +39,60 @@ def _load() -> SymSpell:
     with _lock:
         if _sym is not None:
             return _sym
-        sym = SymSpell(max_dictionary_edit_distance=2, prefix_length=7)
-        sym.load_dictionary(DICT_PATH, term_index=0, count_index=1, encoding="utf-8")
+        ensure_dictionaries()
+        sym = SymSpell(max_dictionary_edit_distance=MAX_EDIT_DISTANCE, prefix_length=7)
+        sym.load_dictionary(DOMAIN_DICT_PATH, term_index=0, count_index=1, encoding="utf-8")
         _sym = sym
     return _sym
 
 
-def correct(query: str) -> str:
-    """
-    Исправляет опечатки в запросе.
-    Возвращает исправленную строку или оригинал если словарь не помог.
+def _is_cyrillic(word: str) -> bool:
+    return all("Ѐ" <= c <= "ӿ" for c in word)
 
-    Примеры:
-        "принтер лазерны"  → "принтер лазерный"
-        "шина летняя"      → "шина летняя"  (без изменений)
-        "HP LaserJet 1020" → "HP LaserJet 1020"  (спецсимволы не трогаем)
-    """
+
+def _in_domain(sym: SymSpell, word: str) -> bool:
+    return bool(sym.lookup(word.lower(), Verbosity.TOP, max_edit_distance=0))
+
+
+def _apply_case(original: str, corrected: str) -> str:
+    if original.isupper():
+        return corrected.upper()
+    if original[0].isupper():
+        return corrected.capitalize()
+    return corrected
+
+
+def _fix_word(sym: SymSpell, word: str) -> str:
+    lower = word.lower()
+    if _in_domain(sym, lower):
+        return word
+
+    suggestions = sym.lookup(lower, Verbosity.CLOSEST, max_edit_distance=MAX_EDIT_DISTANCE)
+    if not suggestions:
+        return word
+
+    best = suggestions[0]
+    if best.distance == 0 or best.distance > MAX_EDIT_DISTANCE:
+        return word
+    if not _in_domain(sym, best.term):
+        return word
+    if len(lower) >= 3 and lower[:2] != best.term[:2]:
+        return word
+
+    return _apply_case(word, best.term)
+
+
+def correct(query: str) -> str:
+    """Опечатки в domain-лексике; остальное без изменений."""
     if not query or len(query.strip()) < 3:
         return query
 
     sym = _load()
-    words = query.split()
     corrected = []
-
-    for word in words:
-        # Не трогаем: числа, артикулы, латиницу, спецсимволы
-        if not word.isalpha() or not _is_cyrillic(word):
+    for word in query.split():
+        if not word.isalpha() or not _is_cyrillic(word) or len(word) <= 3:
             corrected.append(word)
             continue
+        corrected.append(_fix_word(sym, word))
 
-        # Короткие слова (≤3 символа) не трогаем — слишком агрессивно
-        if len(word) <= 3:
-            corrected.append(word)
-            continue
-
-        suggestions = sym.lookup(word.lower(), Verbosity.CLOSEST, max_edit_distance=2)
-        if suggestions and suggestions[0].distance > 0:
-            # Сохраняем регистр оригинального слова
-            fix = suggestions[0].term
-            if word[0].isupper():
-                fix = fix.capitalize()
-            corrected.append(fix)
-        else:
-            corrected.append(word)
-
-    result = " ".join(corrected)
-    return result
-
-
-def _is_cyrillic(word: str) -> bool:
-    return all('Ѐ' <= c <= 'ӿ' for c in word)
+    return " ".join(corrected)

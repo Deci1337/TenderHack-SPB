@@ -110,7 +110,7 @@ def _wb_extract_products_from_text(text: str) -> dict:
     return {}
 
 
-async def search_wildberries(query: str, region: str = "Москва", limit: int = 8) -> list[MarketProduct]:
+async def search_wildberries(query: str, region: str = "Москва", limit: int = 15) -> list[MarketProduct]:
     dests = ["-1257786", "-1275551", "12358062", "-446031"]
     user_agents = [
         "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/144.0.0.0 Safari/537.36",
@@ -167,8 +167,8 @@ async def search_wildberries(query: str, region: str = "Москва", limit: in
                         continue
 
                     result = []
-                    # Тянем 25 кандидатов чтобы было из чего выбрать медиану.
-                    for p in products[:25]:
+                    # Тянем 40 кандидатов чтобы было из чего выбрать медиану.
+                    for p in products[:40]:
                         nm_id = p.get("id") or p.get("nmId") or p.get("nmID")
                         if not nm_id:
                             continue
@@ -219,7 +219,7 @@ async def search_wildberries(query: str, region: str = "Москва", limit: in
     logger.info("WB: httpx заблокирован, переключаемся на Playwright")
     try:
         from marketplace_playwright import search_wb_playwright
-        raw = await search_wb_playwright(query, limit=25)
+        raw = await search_wb_playwright(query, limit=40)
         products = [MarketProduct(
             name=r["name"], price=r["price"], image_url=r["image_url"],
             source_url=r["source_url"], source="wildberries",
@@ -238,7 +238,7 @@ async def search_wildberries(query: str, region: str = "Москва", limit: in
 # OZON
 # ─────────────────────────────────────────────────────────────
 
-async def search_ozon(query: str, region: str = "Москва", limit: int = 8) -> list[MarketProduct]:
+async def search_ozon(query: str, region: str = "Москва", limit: int = 15) -> list[MarketProduct]:
     q = quote(query)
     url = f"https://www.ozon.ru/api/entrypoint-api.bx/page/json/v2?url=%2Fsearch%2F%3Ftext%3D{q}%26layout_container%3DsearchResultsV2"
     headers = {
@@ -266,15 +266,15 @@ async def search_ozon(query: str, region: str = "Москва", limit: int = 8) 
             if not widgets:
                 widgets = data  # попробуем весь ответ
 
-            # Тянем 25 кандидатов, потом выбираем медианные.
-            products = _extract_ozon_items(widgets, 25)
+            # Тянем 40 кандидатов, потом выбираем медианные.
+            products = _extract_ozon_items(widgets, 40)
             if products:
                 return select_median_products(products, limit)
 
     except Exception as e:
         logger.warning("Ozon API error: %s", e)
 
-    products = await _search_ozon_html(query, 25)
+    products = await _search_ozon_html(query, 40)
     if products:
         return select_median_products(products, limit)
 
@@ -282,7 +282,7 @@ async def search_ozon(query: str, region: str = "Москва", limit: int = 8) 
     logger.info("Ozon: httpx заблокирован, переключаемся на Playwright")
     try:
         from marketplace_playwright import search_ozon_playwright
-        raw = await search_ozon_playwright(query, limit=25)
+        raw = await search_ozon_playwright(query, limit=40)
         products = [MarketProduct(
             name=r["name"], price=r["price"], image_url=r["image_url"],
             source_url=r["source_url"], source="ozon",
@@ -295,13 +295,13 @@ async def search_ozon(query: str, region: str = "Москва", limit: int = 8) 
 
     # Последний шанс: DDG site:ozon.ru → JSON-LD с карточек товаров
     logger.info("Ozon: пробуем DDG site:ozon.ru")
-    products = await _search_ozon_via_ddg(query, limit)
+    products = await _search_ozon_via_ddg(query, 40)
     if products:
         return select_median_products(products, limit)
     return []
 
 
-async def _search_ozon_via_ddg(query: str, limit: int = 8) -> list[MarketProduct]:
+async def _search_ozon_via_ddg(query: str, limit: int = 40) -> list[MarketProduct]:
     """Ищет товары Ozon через DDG site:ozon.ru, извлекает JSON-LD с карточек."""
     ddg_url = "https://lite.duckduckgo.com/lite/"
     ddg_headers = {
@@ -320,7 +320,7 @@ async def _search_ozon_via_ddg(query: str, limit: int = 8) -> list[MarketProduct
                 seen_u.add(href)
                 # Убираем лишние query-параметры
                 product_urls.append(href.split("?")[0])
-            if len(product_urls) >= (limit + 4) * 2:
+            if len(product_urls) >= limit:
                 break
     except Exception as e:
         logger.warning("Ozon DDG search failed: %s", e)
@@ -339,9 +339,7 @@ async def _search_ozon_via_ddg(query: str, limit: int = 8) -> list[MarketProduct
     products: list[MarketProduct] = []
     seen_k: set[str] = set()
     async with httpx.AsyncClient(timeout=TIMEOUT, follow_redirects=True) as client:
-        for url in product_urls[:limit + 4]:
-            if len(products) >= limit:
-                break
+        for url in product_urls[:limit]:
             try:
                 r = await client.get(url, headers=ozon_headers)
                 if r.status_code != 200:
@@ -495,7 +493,7 @@ def _extract_ozon_items_from_next(node, seen, results, limit):
 YM_RS_TOKEN = "eJwzEv_EKMLBKLDwEKsEg8azbh6NVUdYNT6fYQUAWiMIFg,,"
 
 
-async def search_yandex_market(query: str, region: str = "Москва", limit: int = 8) -> list[MarketProduct]:
+async def search_yandex_market(query: str, region: str = "Москва", limit: int = 15) -> list[MarketProduct]:
     q = quote(query)
     region_id = _ym_region_id(region)
 
@@ -524,7 +522,7 @@ async def search_yandex_market(query: str, region: str = "Москва", limit: 
                 # YM иногда делает семантический редирект на карточку одного товара —
                 # /card/ или /product/ содержат только 1 JSON-LD, не список.
                 if r.status_code == 200 and "/card/" not in final_url and "/product/" not in final_url:
-                    products = _parse_ym_html(r.text, 25)
+                    products = _parse_ym_html(r.text, 40)
                     if len(products) >= 3:
                         products = select_median_products(products, limit)
                         logger.info("YM: %d медианных товаров для '%s' (url=%s)", len(products), query, final_url)
@@ -539,7 +537,7 @@ async def search_yandex_market(query: str, region: str = "Москва", limit: 
     logger.info("YM: httpx заблокирован, переключаемся на Playwright")
     try:
         from marketplace_playwright import search_ym_playwright
-        raw = await search_ym_playwright(query, limit=25)
+        raw = await search_ym_playwright(query, limit=40)
         products = [MarketProduct(
             name=r["name"], price=r["price"], image_url=r["image_url"],
             source_url=r["source_url"], source="yandex_market",

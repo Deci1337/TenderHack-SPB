@@ -45,11 +45,13 @@ const OZON_DOM_EXTRACT = `(() => {
     if (!title) continue;
     const img = box.querySelector('img');
     const image_url = img ? (img.getAttribute('src') || img.getAttribute('data-src') || '') : '';
-    const deliveryEl = [...box.querySelectorAll('span, div')]
+    const deliveryRaw = [...box.querySelectorAll('span, div')]
       .map((e) => (e.textContent || '').replace(/\\s+/g, ' ').trim())
-      .find((t) => t.length > 0 && t.length < 200 && deliveryRe.test(t));
+      .find((t) => t.length > 0 && t.length < 80 && deliveryRe.test(t) && !/₽/.test(t));
+    const deliveryHit = (deliveryRaw || '').match(deliveryRe);
+    const delivery_text = deliveryHit ? deliveryHit[0] : '';
     seen.add(m[0]);
-    out.push({ title: title.slice(0, 120), price: priceM[1].replace(/\\s/g, ''), url: 'https://www.ozon.ru' + m[0], image_url, delivery_text: deliveryEl || '' });
+    out.push({ title: title.slice(0, 120), price: priceM[1].replace(/\\s/g, ''), url: 'https://www.ozon.ru' + m[0], image_url, delivery_text });
   }
   return JSON.stringify(out);
 })()`;
@@ -103,11 +105,13 @@ const WB_DOM_EXTRACT = `(() => {
     if (!title) continue;
     const img = box.querySelector('img');
     const image_url = img ? (img.getAttribute('src') || img.getAttribute('data-src') || '') : '';
-    const deliveryEl = [...box.querySelectorAll('span, div')]
+    const deliveryRaw = [...box.querySelectorAll('span, div')]
       .map((e) => (e.textContent || '').replace(/\\s+/g, ' ').trim())
-      .find((t) => t.length > 0 && t.length < 200 && deliveryRe.test(t));
+      .find((t) => t.length > 0 && t.length < 80 && deliveryRe.test(t) && !/₽/.test(t));
+    const deliveryHit = (deliveryRaw || '').match(deliveryRe);
+    const delivery_text = deliveryHit ? deliveryHit[0] : '';
     seen.add(m[1]);
-    out.push({ title: title.slice(0, 120), price: priceM[1].replace(/\\s/g, ''), url: 'https://www.wildberries.ru/catalog/' + m[1] + '/detail.aspx', image_url, delivery_text: deliveryEl || '' });
+    out.push({ title: title.slice(0, 120), price: priceM[1].replace(/\\s/g, ''), url: 'https://www.wildberries.ru/catalog/' + m[1] + '/detail.aspx', image_url, delivery_text });
   }
   return JSON.stringify(out);
 })()`;

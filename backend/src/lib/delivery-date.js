@@ -127,11 +127,13 @@ export function parseDeliveryText(text, { now = new Date() } = {}) {
   if (!date) return null;
   const days = diffDays(date, { now });
   if (days < 0) return null;
+  const dateIso = toLocalIsoDate(date);
   return {
     days,
-    text: String(text).trim(),
+    text: `Доставка ${formatDeliveryDays(days)}, ${formatDeliveryDate(dateIso)}`,
+    rawText: String(text).trim(),
     date,
-    dateIso: toLocalIsoDate(date),
+    dateIso,
     shipmentOriginCity: parseShipmentOriginCity(text),
   };
 }
@@ -282,12 +284,13 @@ export async function enrichAndFilterByDelivery(offers, {
   timeoutMs = 60000,
   geo = null,
   fetchDeliveryInfoImpl = fetchDeliveryInfo,
+  now = new Date(),
 } = {}) {
   await Promise.allSettled(
     offers.map(async (offer) => {
       offer.delivery_filter_status = 'checked';
       const hint = offerDeliveryHint(offer);
-      const hintInfo = parseDeliveryText(hint);
+      const hintInfo = parseDeliveryText(hint, { now });
       const pageInfo = !hintInfo || !hintInfo.shipmentOriginCity
         ? await fetchDeliveryInfoImpl(offer.source, offer.product_url, { timeoutMs, geo })
         : null;
@@ -299,8 +302,9 @@ export async function enrichAndFilterByDelivery(offers, {
         const shipmentOriginCity = info.shipmentOriginCity ?? pageInfo?.shipmentOriginCity;
         if (shipmentOriginCity) {
           offer.shipment_origin_city = shipmentOriginCity;
-          if (pageInfo?.text && pageInfo.text !== info.text) {
-            offer.delivery_deep_text = pageInfo.text;
+          const deepText = pageInfo?.rawText ?? pageInfo?.text;
+          if (deepText && deepText !== info.rawText) {
+            offer.delivery_deep_text = deepText;
           }
         }
         offer.delivery_filter_status = info.days <= maxDeliveryDays ? 'inside_deadline' : 'outside_deadline';

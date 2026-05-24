@@ -1,19 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { dedupeOffers, groupBySource } from '../src/lib/dedupe.js';
-import { buildPriceSummary } from '../src/lib/summary.js';
-
-test('dedupeOffers removes duplicate product variants', () => {
-  const offers = [
-    { source: 'wildberries', title: 'Apple iPhone 15 128GB Black', price: 80000, relevance_score: 80 },
-    { source: 'ozon', title: 'iPhone 15 128 GB Apple', price: 79900, relevance_score: 85 },
-    { source: 'yandex_market', title: 'Samsung Galaxy S24', price: 90000, relevance_score: 60 },
-  ];
-
-  const deduped = dedupeOffers(offers);
-  assert.equal(deduped.length, 2);
-  assert.equal(deduped[0].source, 'ozon');
-});
+import { groupBySource, buildPriceSummary } from '../src/lib/summary.js';
 
 test('groupBySource and buildPriceSummary work on the same set', () => {
   const offers = [

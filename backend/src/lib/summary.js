@@ -1,3 +1,11 @@
+export function groupBySource(offers) {
+  return offers.reduce((acc, offer) => {
+    if (!acc[offer.source]) acc[offer.source] = [];
+    acc[offer.source].push(offer);
+    return acc;
+  }, {});
+}
+
 export function buildPriceSummary(offers) {
   const prices = offers.map((offer) => offer.price).filter((price) => Number.isFinite(price)).sort((a, b) => a - b);
   if (prices.length === 0) {
