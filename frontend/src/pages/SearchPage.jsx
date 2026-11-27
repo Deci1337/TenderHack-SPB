@@ -7,7 +7,7 @@ export default function SearchPage() {
   return (
     <main id="main" className="workspace search-workspace">
       <div className="page-heading">
-        <p className="eyebrow">TenderHack · Санкт-Петербург</p>
+        <p className="eyebrow">Система для Портала поставщиков</p>
         <h1>Поиск цен для закупки</h1>
         <p className="lead">
           Найдите сопоставимые предложения и проверьте характеристики товаров в

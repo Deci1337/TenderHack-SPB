@@ -18,14 +18,14 @@ export default function App() {
           />
         </Link>
         <span className="header-section">Поиск цен</span>
-        <span className="header-context">Хакатонный прототип</span>
+        <span className="header-context">Система поиска цен</span>
       </header>
       <Routes>
         <Route path="/" element={<SearchPage />} />
         <Route path="/results" element={<ResultsPage />} />
       </Routes>
       <footer className="portal-footer">
-        <span>TenderHack · Санкт-Петербург</span>
+        <span>Система для Портала поставщиков</span>
         <span>Поиск предложений для обоснования закупки</span>
       </footer>
     </>
