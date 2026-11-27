@@ -12,3 +12,4 @@ venv/
 figma_*.png
 *.md
 !frontend/src/**/*.md
+!docs/design-provenance.md
